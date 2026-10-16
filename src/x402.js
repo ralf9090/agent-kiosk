@@ -8,8 +8,8 @@
  */
 
 export const CONFIG = {
-  // Replace with your Base USDC wallet address via env PAY_TO_WALLET
-  payToWallet: process.env.PAY_TO_WALLET || "0x000000000000000000000000000000000000dEaD",
+  // Base / Ethereum wallet address receiving USDC micropayments
+  payToWallet: process.env.PAY_TO_WALLET || "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95",
   network: process.env.X402_NETWORK || "base",
   // Base Mainnet USDC contract address
   usdcAsset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
