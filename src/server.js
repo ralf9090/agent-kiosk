@@ -432,7 +432,77 @@ export function createAppServer() {
       });
     }
 
-    // 3. A2A & x402 Discovery Manifests
+    // 2b. SEO & AI Crawler Indexing: /robots.txt & /sitemap.xml
+    if (req.method === "GET" && pathname === "/robots.txt") {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      return res.end(`User-agent: *\nAllow: /\nSitemap: ${baseUrl}/sitemap.xml\n`);
+    }
+
+    if (req.method === "GET" && pathname === "/sitemap.xml") {
+      res.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
+      return res.end(
+        `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${baseUrl}/</loc></url>\n  <url><loc>${baseUrl}/llms.txt</loc></url>\n  <url><loc>${baseUrl}/openapi.json</loc></url>\n</urlset>`
+      );
+    }
+
+    // 3. Browser Storefront on GET / (when Accept includes text/html) + A2A/x402 JSON Discovery Manifests
+    if (
+      req.method === "GET" &&
+      pathname === "/" &&
+      (req.headers.accept || "").includes("text/html")
+    ) {
+      const toolRows = MCP_TOOLS.map((t) => {
+        const route = TOOL_TO_ROUTE[t.name];
+        const p = PRICING[route];
+        return `<tr><td><code>${t.name}</code></td><td><code>POST ${route}</code></td><td><strong>$${p.priceUsd} USDC</strong></td><td>${p.description}</td></tr>`;
+      }).join("");
+
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Kiosk — 12-in-1 x402 v2 & MCP Intelligence API for AI Agents</title>
+  <meta name="description" content="Instant pay-per-call B2A data, DeFi order-flow alpha, whale wallet profiler, prediction markets, security audits, and B2B leads via x402 (Base USDC) and MCP." />
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b0f19; color:#e2e8f0; max-width:1040px; margin:0 auto; padding:32px 20px; line-height:1.6; }
+    h1, h2 { color:#fff; }
+    .badges a { display:inline-block; margin-right:10px; padding:6px 12px; border-radius:6px; background:#1e293b; color:#38bdf8; text-decoration:none; font-weight:600; font-size:14px; border:1px solid #334155; }
+    table { width:100%; border-collapse:collapse; margin:20px 0; background:#111827; border-radius:8px; overflow:hidden; }
+    th, td { padding:12px 14px; text-align:left; border-bottom:1px solid #1f2937; font-size:14px; }
+    th { background:#1e293b; color:#94a3b8; }
+    code { background:#1e293b; color:#38bdf8; padding:2px 6px; border-radius:4px; font-size:13px; }
+    pre { background:#111827; padding:16px; border-radius:8px; overflow-x:auto; border:1px solid #1f2937; color:#a7f3d0; }
+  </style>
+</head>
+<body>
+  <h1>⚡ Agent Kiosk — 12-in-1 Autonomous B2A Intelligence Supermarket</h1>
+  <p>No API keys, no sign-ups, no monthly subscriptions. Built for autonomous AI agents paying per request via <strong>x402 v2 (Base USDC)</strong> or connecting via <strong>Model Context Protocol (MCP)</strong>.</p>
+  <div class="badges">
+    <a href="https://www.x402scan.com/server/a1af2789-615a-4324-b3f1-83b97834ece8">🔵 View on x402scan (12/12 Verified)</a>
+    <a href="https://smithery.ai/servers/batuhansenavci/agent-kiosk">🟠 View on Smithery.ai</a>
+    <a href="/openapi.json">📄 OpenAPI 3.1 Spec</a>
+    <a href="/llms.txt">🤖 /llms.txt</a>
+    <a href="/.well-known/x402.json">⚡ /.well-known/x402.json</a>
+  </div>
+  <h2>12 Live Endpoints & MCP Tools (Base Mainnet USDC)</h2>
+  <table>
+    <thead><tr><th>MCP Tool</th><th>x402 Endpoint</th><th>Price</th><th>Description</th></tr></thead>
+    <tbody>${toolRows}</tbody>
+  </table>
+  <h2>Quick Connect (MCP Client / Claude / Cursor)</h2>
+  <pre>{
+  "mcpServers": {
+    "agent-kiosk": {
+      "url": "${baseUrl}/mcp"
+    }
+  }
+}</pre>
+</body>
+</html>`);
+    }
+
     if (
       req.method === "GET" &&
       (pathname === "/.well-known/agent.json" ||
@@ -442,10 +512,10 @@ export function createAppServer() {
     ) {
       return sendJson(res, 200, {
         name: "Agent Kiosk",
-        version: "2.2.0",
+        version: "2.3.0",
         x402Version: 2,
         description:
-          "8-in-1 Autonomous B2A Data, Market Alpha & Security Supermarket via x402 v2 (Base USDC) and MCP.",
+          "12-in-1 Autonomous B2A Data, Market Alpha & Security Supermarket via x402 v2 (Base USDC) and MCP.",
         protocols: ["x402", "mcp", "rest"],
         payment: {
           network: CONFIG.network,
