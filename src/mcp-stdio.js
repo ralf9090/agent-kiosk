@@ -13,6 +13,10 @@ import {
   domainIntel,
   packageAudit,
   academicSearch,
+  walletProfiler,
+  predictionMarkets,
+  defiYields,
+  githubIntel,
 } from "./providers.js";
 
 const HANDLERS = {
@@ -24,6 +28,10 @@ const HANDLERS = {
   domain_intel: domainIntel,
   package_audit: packageAudit,
   academic_search: academicSearch,
+  wallet_profiler: walletProfiler,
+  prediction_markets: predictionMarkets,
+  defi_yields: defiYields,
+  github_intel: githubIntel,
 };
 
 const rl = readline.createInterface({

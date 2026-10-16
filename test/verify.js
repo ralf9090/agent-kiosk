@@ -16,7 +16,7 @@ try {
   assert.equal(discRes.status, 200);
   const disc = await discRes.json();
   assert.equal(disc.x402Version, 2);
-  assert.equal(disc.resources.length, 8);
+  assert.equal(disc.resources.length, 12);
 
   const favRes = await fetch(`${base}/favicon.ico`);
   assert.equal(favRes.status, 200);
@@ -25,14 +25,14 @@ try {
   assert.equal(openApiRes.status, 200);
   const openApi = await openApiRes.json();
   assert.ok(openApi.info.contact.email);
-  assert.equal(Object.keys(openApi.paths).length, 8);
-  console.log("✅ 1. Discovery manifest, /openapi.json (8 paths), and /favicon.ico verified");
+  assert.equal(Object.keys(openApi.paths).length, 12);
+  console.log("✅ 1. Discovery manifest, /openapi.json (12 paths), and /favicon.ico verified");
 
   // 2. Test unauthenticated REST request returns HTTP 402 with x402Version 2 and PAYMENT-REQUIRED header
-  const unpaidRes = await fetch(`${base}/v1/token-alpha`, {
+  const unpaidRes = await fetch(`${base}/v1/wallet-profiler`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: "AERO" }),
+    body: JSON.stringify({ address: "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95" }),
   });
   assert.equal(unpaidRes.status, 402);
   assert.ok(unpaidRes.headers.get("payment-required"));
@@ -53,7 +53,7 @@ try {
   const mapsRes = await fetch(`${base}/v1/maps-leads`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
-    body: JSON.stringify({ query: "cafe", location: "San Francisco", limit: 3 }),
+    body: JSON.stringify({ query: "dentist", location: "Istanbul", limit: 3 }),
   });
   assert.equal(mapsRes.status, 200);
   const mapsData = await mapsRes.json();
@@ -145,7 +145,63 @@ try {
   assert.ok(acadData.data.count > 0);
   console.log(`✅ 10. /v1/academic-search verified (${acadData.data.count} papers)`);
 
-  // 11. Test MCP JSON-RPC tools/list returns all 8 tools
+  // 11. Test authorized /v1/wallet-profiler (profiling Vitalik's known public address)
+  const walletRes = await fetch(`${base}/v1/wallet-profiler`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045" }),
+  });
+  assert.equal(walletRes.status, 200);
+  const walletData = await walletRes.json();
+  assert.equal(walletData.ok, true);
+  assert.equal(walletData.data.chains.length, 4);
+  console.log(
+    `✅ 11. /v1/wallet-profiler verified (Tier: ${walletData.data.wallet_tier}, Total Txs: ${walletData.data.totals.total_outgoing_txs})`
+  );
+
+  // 12. Test authorized /v1/prediction-markets
+  const predRes = await fetch(`${base}/v1/prediction-markets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ query: "bitcoin", limit: 3 }),
+  });
+  assert.equal(predRes.status, 200);
+  const predData = await predRes.json();
+  assert.equal(predData.ok, true);
+  assert.ok(predData.data.count > 0);
+  console.log(
+    `✅ 12. /v1/prediction-markets verified (${predData.data.count} markets -> "${predData.data.markets[0].question.slice(0, 45)}...")`
+  );
+
+  // 13. Test authorized /v1/defi-yields
+  const yieldRes = await fetch(`${base}/v1/defi-yields`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ symbol: "USDC", chain: "Base", limit: 3 }),
+  });
+  assert.equal(yieldRes.status, 200);
+  const yieldData = await yieldRes.json();
+  assert.equal(yieldData.ok, true);
+  assert.ok(yieldData.data.count > 0);
+  console.log(
+    `✅ 13. /v1/defi-yields verified (Top Base USDC pool: ${yieldData.data.pools[0].project} @ ${yieldData.data.pools[0].apy_total_pct}% APY)`
+  );
+
+  // 14. Test authorized /v1/github-intel
+  const ghRes = await fetch(`${base}/v1/github-intel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ query: "modelcontextprotocol/servers" }),
+  });
+  assert.equal(ghRes.status, 200);
+  const ghData = await ghRes.json();
+  assert.equal(ghData.ok, true);
+  assert.ok(ghData.data.stars > 0);
+  console.log(
+    `✅ 14. /v1/github-intel verified (${ghData.data.full_name} -> ⭐ ${ghData.data.stars} stars)`
+  );
+
+  // 15. Test MCP JSON-RPC tools/list returns all 12 tools
   const mcpRes = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -153,8 +209,8 @@ try {
   });
   assert.equal(mcpRes.status, 200);
   const mcpData = await mcpRes.json();
-  assert.equal(mcpData.result.tools.length, 8);
-  console.log("✅ 11. MCP JSON-RPC endpoint (/mcp) verified with all 8 tools");
+  assert.equal(mcpData.result.tools.length, 12);
+  console.log("✅ 15. MCP JSON-RPC endpoint (/mcp) verified with all 12 tools");
 } finally {
   server.close();
 }

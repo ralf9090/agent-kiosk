@@ -1054,3 +1054,382 @@ export async function academicSearch({ query, limit = 5 }) {
     llm_markdown: markdown || "No academic papers found for this query.",
   };
 }
+
+const EVM_CHAINS = [
+  {
+    chain: "base",
+    rpc: "https://mainnet.base.org",
+    nativeSymbol: "ETH",
+    usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  },
+  {
+    chain: "ethereum",
+    rpc: "https://ethereum-rpc.publicnode.com",
+    nativeSymbol: "ETH",
+    usdc: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  },
+  {
+    chain: "arbitrum",
+    rpc: "https://arbitrum-one-rpc.publicnode.com",
+    nativeSymbol: "ETH",
+    usdc: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  },
+  {
+    chain: "polygon",
+    rpc: "https://polygon-bor-rpc.publicnode.com",
+    nativeSymbol: "POL",
+    usdc: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+  },
+];
+
+/**
+ * 9. Multi-Chain Wallet & Whale Portfolio Profiler (Base, Ethereum, Arbitrum, Polygon).
+ * Queries native ETH/POL balances, USDC balances, total tx count (nonce), and smart-contract vs EOA status.
+ */
+export async function walletProfiler({ address }) {
+  if (!address || typeof address !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(address.trim())) {
+    throw new Error("Missing or invalid parameter: 'address' (must be a 0x... 40-hex EVM address)");
+  }
+
+  const cleanAddr = address.trim();
+  const paddedAddr = cleanAddr.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  const balanceOfData = `0x70a08231${paddedAddr}`;
+
+  const chainResults = await Promise.all(
+    EVM_CHAINS.map(async (c) => {
+      try {
+        const res = await fetch(c.rpc, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
+          body: JSON.stringify([
+            { jsonrpc: "2.0", id: 1, method: "eth_getBalance", params: [cleanAddr, "latest"] },
+            { jsonrpc: "2.0", id: 2, method: "eth_getTransactionCount", params: [cleanAddr, "latest"] },
+            { jsonrpc: "2.0", id: 3, method: "eth_call", params: [{ to: c.usdc, data: balanceOfData }, "latest"] },
+            { jsonrpc: "2.0", id: 4, method: "eth_getCode", params: [cleanAddr, "latest"] },
+          ]),
+          signal: AbortSignal.timeout(6000),
+        });
+        if (!res.ok) return { chain: c.chain, error: `HTTP ${res.status}` };
+        const batch = await res.json();
+        const byId = Object.fromEntries((batch || []).map((item) => [item.id, item.result]));
+
+        const nativeWei = BigInt(byId[1] || "0x0");
+        const nativeBalance = Number(nativeWei) / 1e18;
+        const txCount = parseInt(byId[2] || "0x0", 16);
+        const usdcRaw = BigInt(byId[3] && byId[3] !== "0x" ? byId[3] : "0x0");
+        const usdcBalance = Number(usdcRaw) / 1e6;
+        const isContract = Boolean(byId[4] && byId[4] !== "0x" && byId[4] !== "0x0");
+
+        return {
+          chain: c.chain,
+          native_symbol: c.nativeSymbol,
+          native_balance: Number(nativeBalance.toFixed(6)),
+          usdc_balance: Number(usdcBalance.toFixed(2)),
+          tx_count_nonce: txCount,
+          is_contract: isContract,
+        };
+      } catch {
+        return {
+          chain: c.chain,
+          native_symbol: c.nativeSymbol,
+          native_balance: 0,
+          usdc_balance: 0,
+          tx_count_nonce: 0,
+          is_contract: false,
+        };
+      }
+    })
+  );
+
+  const totalUsdc = chainResults.reduce((acc, c) => acc + (c.usdc_balance || 0), 0);
+  const totalEth = chainResults
+    .filter((c) => c.native_symbol === "ETH")
+    .reduce((acc, c) => acc + (c.native_balance || 0), 0);
+  const totalTxs = chainResults.reduce((acc, c) => acc + (c.tx_count_nonce || 0), 0);
+  const isSmartContractAny = chainResults.some((c) => c.is_contract);
+
+  let walletTier = "NEW_OR_INACTIVE";
+  if (totalUsdc >= 50000 || totalEth >= 20) {
+    walletTier = "WHALE";
+  } else if (totalUsdc >= 1000 || totalEth >= 0.5 || totalTxs >= 100) {
+    walletTier = "ACTIVE_TRADER";
+  } else if (totalTxs > 0 || totalUsdc > 0 || totalEth > 0) {
+    walletTier = "RETAIL_ACTIVE";
+  }
+
+  return {
+    address: cleanAddr,
+    wallet_tier: walletTier,
+    entity_type: isSmartContractAny ? "SMART_CONTRACT_OR_SAFE" : "EOA_WALLET",
+    totals: {
+      total_usdc: Number(totalUsdc.toFixed(2)),
+      total_eth: Number(totalEth.toFixed(6)),
+      total_outgoing_txs: totalTxs,
+    },
+    chains: chainResults,
+    llm_summary: `Wallet ${cleanAddr} (${walletTier}): Total USDC: $${totalUsdc.toFixed(
+      2
+    )} | Total ETH: ${totalEth.toFixed(4)} ETH | Total Outgoing Txs: ${totalTxs} across Base, Ethereum, Arbitrum, Polygon.`,
+  };
+}
+
+/**
+ * 10. Prediction Markets & Real-World Event Probabilities (Polymarket + Manifold Markets).
+ * Returns live crowd-sourced and real-money implied probabilities (%) for macro, crypto, tech, and political events.
+ */
+export async function predictionMarkets({ query, limit = 5 }) {
+  if (!query || typeof query !== "string" || !query.trim()) {
+    throw new Error("Missing required parameter: 'query' (e.g., 'bitcoin', 'fed', 'AI')");
+  }
+
+  const safeLimit = Math.min(Math.max(Number(limit) || 5, 1), 15);
+  const cleanQuery = query.trim();
+
+  const [polyRes, manifoldRes] = await Promise.allSettled([
+    fetch(`https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(cleanQuery)}`, {
+      headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(4500),
+    }).then((r) => (r.ok ? r.json() : null)),
+    fetch(
+      `https://api.manifold.markets/v0/search-markets?term=${encodeURIComponent(
+        cleanQuery
+      )}&filter=open&sort=liquidity&limit=${safeLimit * 2}`,
+      { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(6000) }
+    ).then((r) => (r.ok ? r.json() : null)),
+  ]);
+
+  const markets = [];
+
+  if (polyRes.status === "fulfilled" && polyRes.value?.events) {
+    for (const ev of polyRes.value.events.slice(0, safeLimit)) {
+      const m = ev.markets?.[0];
+      let yesProbPct = null;
+      try {
+        const prices = typeof m?.outcomePrices === "string" ? JSON.parse(m.outcomePrices) : m?.outcomePrices;
+        if (Array.isArray(prices) && prices.length > 0) {
+          yesProbPct = Number((Number(prices[0]) * 100).toFixed(1));
+        }
+      } catch {
+        // ignore parse errors
+      }
+      markets.push({
+        source: "polymarket",
+        question: ev.title || m?.question,
+        probability_yes_pct: yesProbPct,
+        volume_usd: Math.round(Number(ev.volume || m?.volume || 0)),
+        url: `https://polymarket.com/event/${ev.slug}`,
+      });
+    }
+  }
+
+  if (manifoldRes.status === "fulfilled" && Array.isArray(manifoldRes.value)) {
+    for (const m of manifoldRes.value) {
+      if (typeof m.probability !== "number" && !m.question) continue;
+      markets.push({
+        source: "manifold",
+        question: m.question,
+        probability_yes_pct:
+          typeof m.probability === "number" ? Number((m.probability * 100).toFixed(1)) : null,
+        volume_usd: Math.round(Number(m.volume || 0)),
+        url: m.url,
+      });
+    }
+  }
+
+  const finalMarkets = markets.slice(0, safeLimit);
+  const markdown = finalMarkets
+    .map(
+      (m, i) =>
+        `${i + 1}. **[${m.source.toUpperCase()}] ${m.question}**\n` +
+        `   - Implied Probability (YES): **${
+          m.probability_yes_pct !== null ? `${m.probability_yes_pct}%` : "Multi-Choice"
+        }** | Volume: $${m.volume_usd.toLocaleString()}\n` +
+        `   - URL: ${m.url}`
+    )
+    .join("\n");
+
+  return {
+    query: cleanQuery,
+    count: finalMarkets.length,
+    markets: finalMarkets,
+    llm_markdown: markdown || "No active prediction markets found for this topic.",
+  };
+}
+
+/**
+ * 11. DeFi Best Yield & APY Radar (powered by DeFiLlama Yields).
+ * Finds highest-APY liquidity & lending pools for any asset (USDC, ETH, USDT, WBTC) filtered by chain and minimum TVL.
+ */
+export async function defiYields({
+  symbol = "USDC",
+  chain = "Base",
+  min_tvl_usd = 100000,
+  limit = 5,
+}) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 5, 1), 20);
+  const minTvl = Math.max(Number(min_tvl_usd) || 100000, 10000);
+  const symUpper = (symbol || "USDC").trim().toUpperCase();
+  const chainLower = (chain || "all").trim().toLowerCase();
+
+  const res = await fetch("https://yields.llama.fi/pools", {
+    headers: { "User-Agent": USER_AGENT },
+    signal: AbortSignal.timeout(9000),
+  });
+
+  if (!res.ok) {
+    throw new Error(`DeFiLlama yields provider returned HTTP ${res.status}`);
+  }
+
+  const payload = await res.json();
+  const allPools = payload?.data || [];
+
+  const matched = allPools.filter((p) => {
+    if (!p.symbol || Number(p.tvlUsd || 0) < minTvl || Number(p.apy || 0) <= 0) return false;
+    if (Number(p.apy) > 500) return false; // exclude broken/outlier APYs
+    const poolSym = p.symbol.toUpperCase();
+    const symMatch = poolSym === symUpper || poolSym.split("-").includes(symUpper);
+    if (!symMatch) return false;
+    if (chainLower !== "all" && (p.chain || "").toLowerCase() !== chainLower) return false;
+    return true;
+  });
+
+  matched.sort((a, b) => Number(b.apy || 0) - Number(a.apy || 0));
+  const topPools = matched.slice(0, safeLimit).map((p) => ({
+    project: p.project,
+    chain: p.chain,
+    symbol: p.symbol,
+    apy_total_pct: Number(Number(p.apy || 0).toFixed(2)),
+    apy_base_pct: Number(Number(p.apyBase || 0).toFixed(2)),
+    apy_reward_pct: Number(Number(p.apyReward || 0).toFixed(2)),
+    tvl_usd: Math.round(Number(p.tvlUsd || 0)),
+    stablecoin_pool: Boolean(p.stablecoin),
+    il_risk: p.ilRisk || "unknown",
+    pool_id: p.pool,
+  }));
+
+  const markdown = topPools
+    .map(
+      (p, i) =>
+        `${i + 1}. **${p.project}** (${p.chain} — \`${p.symbol}\`): **${p.apy_total_pct}% APY** | TVL: $${p.tvl_usd.toLocaleString()}`
+    )
+    .join("\n");
+
+  return {
+    symbol: symUpper,
+    chain: chain || "all",
+    min_tvl_usd: minTvl,
+    count: topPools.length,
+    pools: topPools,
+    llm_markdown: markdown || `No matching DeFi yield pools found for ${symUpper} on ${chain}.`,
+  };
+}
+
+/**
+ * 12. GitHub Repository & Open-Source Competitive Intelligence.
+ * Accepts either 'owner/repo' or a search topic and returns star velocity, latest releases, issues, and tech stack.
+ */
+export async function githubIntel({ query, limit = 5 }) {
+  if (!query || typeof query !== "string" || !query.trim()) {
+    throw new Error("Missing required parameter: 'query' (e.g., 'modelcontextprotocol/servers' or 'x402')");
+  }
+
+  const cleanQuery = query.trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\/$/, "");
+  const safeLimit = Math.min(Math.max(Number(limit) || 5, 1), 15);
+  const headers = {
+    "User-Agent": USER_AGENT,
+    Accept: "application/vnd.github+json",
+  };
+
+  // Case A: Exact owner/repo lookup
+  if (/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(cleanQuery) && !cleanQuery.includes(" ")) {
+    const [repoRes, relRes] = await Promise.allSettled([
+      fetch(`https://api.github.com/repos/${cleanQuery}`, {
+        headers,
+        signal: AbortSignal.timeout(7000),
+      }).then((r) => (r.ok ? r.json() : null)),
+      fetch(`https://api.github.com/repos/${cleanQuery}/releases?per_page=3`, {
+        headers,
+        signal: AbortSignal.timeout(7000),
+      }).then((r) => (r.ok ? r.json() : [])),
+    ]);
+
+    const r = repoRes.status === "fulfilled" ? repoRes.value : null;
+    if (r) {
+      const releases =
+        relRes.status === "fulfilled" && Array.isArray(relRes.value)
+          ? relRes.value.map((rel) => ({
+              tag: rel.tag_name,
+              name: rel.name,
+              published_at: rel.published_at,
+              url: rel.html_url,
+            }))
+          : [];
+
+      return {
+        mode: "repository",
+        full_name: r.full_name,
+        description: r.description,
+        stars: r.stargazers_count,
+        forks: r.forks_count,
+        open_issues: r.open_issues_count,
+        watchers: r.subscribers_count,
+        language: r.language,
+        license: r.license?.spdx_id || null,
+        topics: r.topics || [],
+        created_at: r.created_at,
+        pushed_at: r.pushed_at,
+        homepage: r.homepage || null,
+        url: r.html_url,
+        latest_releases: releases,
+        llm_summary: `${r.full_name} (${r.language || "Multi"}): ⭐ ${r.stargazers_count} stars | 🍴 ${
+          r.forks_count
+        } forks | 🐛 ${r.open_issues_count} open issues | Last push: ${r.pushed_at}. ${
+          r.description || ""
+        }`,
+      };
+    }
+  }
+
+  // Case B: Topic / keyword repository search
+  const searchRes = await fetch(
+    `https://api.github.com/search/repositories?q=${encodeURIComponent(
+      cleanQuery
+    )}&sort=stars&order=desc&per_page=${safeLimit}`,
+    { headers, signal: AbortSignal.timeout(7000) }
+  );
+
+  if (!searchRes.ok) {
+    throw new Error(`GitHub API returned HTTP ${searchRes.status}`);
+  }
+
+  const searchData = await searchRes.json();
+  const repos = (searchData?.items || []).slice(0, safeLimit).map((r) => ({
+    full_name: r.full_name,
+    description: r.description,
+    stars: r.stargazers_count,
+    forks: r.forks_count,
+    open_issues: r.open_issues_count,
+    language: r.language,
+    license: r.license?.spdx_id || null,
+    pushed_at: r.pushed_at,
+    url: r.html_url,
+  }));
+
+  const markdown = repos
+    .map(
+      (r, i) =>
+        `${i + 1}. **[${r.full_name}](${r.url})** (⭐ ${r.stars.toLocaleString()} | ${
+          r.language || "N/A"
+        })\n   - ${r.description || "No description"}`
+    )
+    .join("\n");
+
+  return {
+    mode: "search",
+    query: cleanQuery,
+    count: repos.length,
+    repositories: repos,
+    llm_markdown: markdown || "No GitHub repositories found for this query.",
+  };
+}
+

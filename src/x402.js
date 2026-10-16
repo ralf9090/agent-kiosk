@@ -71,6 +71,34 @@ export const PRICING = {
       "Peer-reviewed scientific paper & preprint search (OpenAlex + arXiv) returning citations, reconstructed abstracts, and direct Open-Access PDF links.",
     mimeType: "application/json",
   },
+  "/v1/wallet-profiler": {
+    priceUsd: "0.03",
+    amount: "30000", // 0.03 USDC
+    description:
+      "Multi-chain whale & wallet portfolio profiler across Base, Ethereum, Arbitrum, and Polygon: live USDC & ETH balances, transaction counts, and smart contract detection.",
+    mimeType: "application/json",
+  },
+  "/v1/prediction-markets": {
+    priceUsd: "0.02",
+    amount: "20000", // 0.02 USDC
+    description:
+      "Live prediction market odds & implied event probabilities (%) from Polymarket and Manifold Markets for macro, crypto, tech, and politics.",
+    mimeType: "application/json",
+  },
+  "/v1/defi-yields": {
+    priceUsd: "0.02",
+    amount: "20000", // 0.02 USDC
+    description:
+      "DeFi highest APY & yield radar powered by DeFiLlama: ranks top liquidity and lending pools by APY and TVL for any token and chain.",
+    mimeType: "application/json",
+  },
+  "/v1/github-intel": {
+    priceUsd: "0.01",
+    amount: "10000", // 0.01 USDC
+    description:
+      "GitHub repository & open-source competitive intelligence: stars, forks, open issues, latest releases, and top repositories by topic.",
+    mimeType: "application/json",
+  },
 };
 
 /**

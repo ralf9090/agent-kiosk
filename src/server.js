@@ -8,6 +8,10 @@ import {
   domainIntel,
   packageAudit,
   academicSearch,
+  walletProfiler,
+  predictionMarkets,
+  defiYields,
+  githubIntel,
 } from "./providers.js";
 import { CONFIG, PRICING, verifyAndSettlePayment } from "./x402.js";
 
@@ -183,6 +187,85 @@ export const MCP_TOOLS = [
       required: ["query"],
     },
   },
+  {
+    name: "wallet_profiler",
+    description:
+      "Multi-chain whale & wallet portfolio profiler across Base, Ethereum, Arbitrum, and Polygon. Returns live USDC and native ETH/POL balances, total outgoing transaction counts (nonce), wallet tier (Whale/Trader/Retail), and smart contract vs EOA detection.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        address: {
+          type: "string",
+          description: "0x... 40-hex EVM wallet or contract address to profile",
+        },
+      },
+      required: ["address"],
+    },
+  },
+  {
+    name: "prediction_markets",
+    description:
+      "Query live prediction market odds & real-money implied probabilities (%) from Polymarket and Manifold Markets for any crypto, macro-economic, political, or technology event.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Event or topic to search (e.g., 'bitcoin', 'fed rate', 'AI', 'election')",
+        },
+        limit: {
+          type: "number",
+          description: "Number of markets to return (1-15, default: 5)",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "defi_yields",
+    description:
+      "DeFi highest APY & yield radar powered by DeFiLlama. Finds top lending and liquidity pools for any token (USDC, ETH, USDT, WBTC) filtered by blockchain and minimum TVL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: {
+          type: "string",
+          description: "Token symbol to earn yield on (default: 'USDC')",
+        },
+        chain: {
+          type: "string",
+          description: "Blockchain name such as 'Base', 'Ethereum', 'Arbitrum', 'Solana', or 'all' (default: 'Base')",
+        },
+        min_tvl_usd: {
+          type: "number",
+          description: "Minimum pool TVL in USD for safety filtering (default: 100000)",
+        },
+        limit: {
+          type: "number",
+          description: "Number of top pools to return (1-20, default: 5)",
+        },
+      },
+    },
+  },
+  {
+    name: "github_intel",
+    description:
+      "GitHub repository & open-source competitive intelligence. Pass 'owner/repo' for deep repository metrics and latest releases, or a keyword topic to find the fastest-growing repositories.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Repository 'owner/repo' (e.g., 'vercel/next.js') OR search topic (e.g., 'mcp server')",
+        },
+        limit: {
+          type: "number",
+          description: "Number of repositories when searching by topic (1-15, default: 5)",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 const ROUTE_HANDLERS = {
@@ -194,6 +277,10 @@ const ROUTE_HANDLERS = {
   "/v1/domain-intel": domainIntel,
   "/v1/package-audit": packageAudit,
   "/v1/academic-search": academicSearch,
+  "/v1/wallet-profiler": walletProfiler,
+  "/v1/prediction-markets": predictionMarkets,
+  "/v1/defi-yields": defiYields,
+  "/v1/github-intel": githubIntel,
 };
 
 const TOOL_TO_ROUTE = {
@@ -205,6 +292,10 @@ const TOOL_TO_ROUTE = {
   domain_intel: "/v1/domain-intel",
   package_audit: "/v1/package-audit",
   academic_search: "/v1/academic-search",
+  wallet_profiler: "/v1/wallet-profiler",
+  prediction_markets: "/v1/prediction-markets",
+  defi_yields: "/v1/defi-yields",
+  github_intel: "/v1/github-intel",
 };
 
 function readJsonBody(req) {
