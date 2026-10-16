@@ -211,6 +211,25 @@ try {
   const mcpData = await mcpRes.json();
   assert.equal(mcpData.result.tools.length, 12);
   console.log("✅ 15. MCP JSON-RPC endpoint (/mcp) verified with all 12 tools");
+
+  // 16. Test unpaid MCP tools/call returns HTTP 200 Freemium Teaser Preview + x402 unlock hook
+  const mcpCallRes = await fetch(`${base}/mcp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "maps_leads", arguments: { query: "hotel", location: "Istanbul", limit: 5 } },
+    }),
+  });
+  assert.equal(mcpCallRes.status, 200);
+  const mcpCallJson = await mcpCallRes.json();
+  const teaserContent = JSON.parse(mcpCallJson.result.content[0].text);
+  assert.equal(teaserContent.tier, "FREE_MCP_TEASER_PREVIEW");
+  assert.equal(teaserContent.preview_data.leads.length, 1);
+  assert.ok(teaserContent.x402_unlock_full_data.pay_to_wallet);
+  console.log("✅ 16. MCP Freemium Teaser Hook verified (HTTP 200 + 1-item preview + x402 paywall)");
 } finally {
   server.close();
 }

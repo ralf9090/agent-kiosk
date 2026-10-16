@@ -562,11 +562,73 @@ export function createAppServer() {
             });
           }
 
-          const auth = await verifyAndSettlePayment(req, mappedRoute, `${baseUrl}/mcp`);
-          if (!auth.authorized) {
+          const hasPaymentAttempt = Boolean(
+            req.headers["payment-signature"] || req.headers["x-payment"]
+          );
+          const auth = await verifyAndSettlePayment(req, mappedRoute, `${baseUrl}${mappedRoute}`);
+
+          if (!auth.authorized && hasPaymentAttempt) {
             return sendJson(res, 402, auth.challenge, {
               "PAYMENT-REQUIRED": auth.challengeHeader,
             });
+          }
+
+          if (!auth.authorized) {
+            // Freemium Teaser Mode for MCP (Smithery / Cursor / Claude):
+            // Returns HTTP 200 OK with 1 teaser item + exact x402 USDC payment instructions to unlock full data
+            const teaserArgs = { ...args, limit: 2, max_length: 600 };
+            const rawPreview = await ROUTE_HANDLERS[mappedRoute](teaserArgs);
+            const priceUsd = PRICING[mappedRoute]?.priceUsd || "0.02";
+            const lockNote = `[LOCKED — Pay $${priceUsd} USDC on Base via x402 POST ${baseUrl}${mappedRoute} to unlock full dataset]`;
+
+            const teaserPayload = {
+              tier: "FREE_MCP_TEASER_PREVIEW",
+              notice: `Showing limited preview. Unlock full unmasked results (up to 25 items, phone numbers, full markdown & alpha signals) by calling POST ${baseUrl}${mappedRoute} with x402 v2 payment ($${priceUsd} USDC on Base).`,
+              preview_data: {
+                ...rawPreview,
+                items: rawPreview.items ? rawPreview.items.slice(0, 1) : undefined,
+                leads: rawPreview.leads
+                  ? rawPreview.leads.slice(0, 1).map((l) => ({
+                      ...l,
+                      phone: l.phone ? lockNote : null,
+                      email: l.email ? lockNote : null,
+                    }))
+                  : undefined,
+                top_pools: rawPreview.top_pools ? rawPreview.top_pools.slice(0, 1) : undefined,
+                pools: rawPreview.pools ? rawPreview.pools.slice(0, 1) : undefined,
+                papers: rawPreview.papers ? rawPreview.papers.slice(0, 1) : undefined,
+                markets: rawPreview.markets ? rawPreview.markets.slice(0, 1) : undefined,
+                repositories: rawPreview.repositories ? rawPreview.repositories.slice(0, 1) : undefined,
+                active_subdomains: rawPreview.active_subdomains
+                  ? rawPreview.active_subdomains.slice(0, 2)
+                  : undefined,
+                llm_markdown: rawPreview.llm_markdown
+                  ? `${rawPreview.llm_markdown.slice(0, 450)}\n\n... ${lockNote}`
+                  : undefined,
+              },
+              x402_unlock_full_data: {
+                endpoint: `${baseUrl}${mappedRoute}`,
+                method: "POST",
+                price_usdc: priceUsd,
+                network: CONFIG.network,
+                usdc_contract: CONFIG.usdcAsset,
+                pay_to_wallet: CONFIG.payToWallet,
+                payment_required_challenge: auth.challenge,
+              },
+            };
+
+            return sendJson(
+              res,
+              200,
+              {
+                jsonrpc: "2.0",
+                id,
+                result: {
+                  content: [{ type: "text", text: JSON.stringify(teaserPayload, null, 2) }],
+                },
+              },
+              { "PAYMENT-REQUIRED": auth.challengeHeader }
+            );
           }
 
           const output = await ROUTE_HANDLERS[mappedRoute](args);
