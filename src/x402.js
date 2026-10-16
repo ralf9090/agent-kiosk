@@ -1,7 +1,7 @@
 /**
  * x402 Payment Protocol Middleware & Verification + Settlement Layer
- * Implements the full HTTP 402 Payment Required specification:
- * 1. Challenge generation (HTTP 402 + accepts array)
+ * Implements the full HTTP 402 Payment Required specification (including x402scan outputSchema):
+ * 1. Challenge generation (HTTP 402 + accepts array with input/output schema for x402scan & Bazaar)
  * 2. Cryptographic signature verification (/verify)
  * 3. On-chain settlement (/settle) so USDC is actually transferred to payToWallet
  * 4. Optional API_SECRET_KEY header for prepaid / Apify / Smithery B2B integrations
@@ -25,6 +25,42 @@ export const PRICING = {
     description:
       "Real-time social media search (Reddit, HackerNews) returning clean JSON & Markdown for AI agents.",
     mimeType: "application/json",
+    outputSchema: {
+      input: {
+        type: "http",
+        method: "POST",
+        bodyType: "json",
+        bodyFields: {
+          query: {
+            type: "string",
+            required: true,
+            description: "Search keywords or topic (e.g., 'AI agents', 'Stripe alternatives')",
+          },
+          platform: {
+            type: "string",
+            required: false,
+            description: "Platform filter: 'all', 'reddit', or 'hn'",
+          },
+          limit: {
+            type: "number",
+            required: false,
+            description: "Max results (1-25, default 10)",
+          },
+        },
+      },
+      output: {
+        ok: { type: "boolean" },
+        data: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            count: { type: "number" },
+            items: { type: "array" },
+            llm_markdown: { type: "string" },
+          },
+        },
+      },
+    },
   },
   "/v1/maps-leads": {
     priceUsd: "$0.03",
@@ -32,11 +68,48 @@ export const PRICING = {
     description:
       "Local business lead extractor returning company name, phone, website, address, and coordinates.",
     mimeType: "application/json",
+    outputSchema: {
+      input: {
+        type: "http",
+        method: "POST",
+        bodyType: "json",
+        bodyFields: {
+          query: {
+            type: "string",
+            required: true,
+            description: "Business category or keyword (e.g., 'cafe', 'dentist', 'lawyer')",
+          },
+          location: {
+            type: "string",
+            required: false,
+            description: "City or region (e.g., 'San Francisco', 'London', 'Istanbul')",
+          },
+          limit: {
+            type: "number",
+            required: false,
+            description: "Max leads to return (1-25, default 10)",
+          },
+        },
+      },
+      output: {
+        ok: { type: "boolean" },
+        data: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            location: { type: "string" },
+            count: { type: "number" },
+            leads: { type: "array" },
+            llm_markdown: { type: "string" },
+          },
+        },
+      },
+    },
   },
 };
 
 /**
- * Build standard x402 402 Payment Required response body
+ * Build standard x402 402 Payment Required response body (compliant with x402scan strict validator)
  */
 export function build402Challenge(routePath, resourceUrl) {
   const route = PRICING[routePath] || PRICING["/v1/social-search"];
@@ -55,6 +128,7 @@ export function build402Challenge(routePath, resourceUrl) {
         payTo: CONFIG.payToWallet,
         maxTimeoutSeconds: 60,
         asset: CONFIG.usdcAsset,
+        outputSchema: route.outputSchema,
         extra: {
           name: "USD Coin",
           version: "2",

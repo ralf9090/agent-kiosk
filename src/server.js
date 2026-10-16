@@ -110,15 +110,65 @@ export function createAppServer() {
           `- POST ${baseUrl}/v1/maps-leads (${PRICING["/v1/maps-leads"].priceUsd} USDC via x402): Business name, phone, website, address, and coordinates.`,
           `- POST ${baseUrl}/mcp : Model Context Protocol (JSON-RPC 2.0) server endpoint.`,
           `- GET ${baseUrl}/.well-known/x402.json : A2A & x402 machine discovery manifest.`,
+          `- GET ${baseUrl}/openapi.json : OpenAPI 3.1 specification.`,
         ].join("\n")
       );
     }
 
-    // 2. A2A & x402 Discovery Manifests
+    // 2. OpenAPI 3.1 Spec for automated agent & x402scan discovery
+    if (req.method === "GET" && pathname === "/openapi.json") {
+      return sendJson(res, 200, {
+        openapi: "3.1.0",
+        info: {
+          title: "Agent Kiosk B2A API",
+          version: "1.0.0",
+          description:
+            "Instant Pay-Per-Call Social Search & Local Business Leads for AI Agents via x402 (Base USDC) and MCP.",
+        },
+        servers: [{ url: baseUrl }],
+        paths: {
+          "/v1/social-search": {
+            post: {
+              operationId: "socialSearch",
+              summary: PRICING["/v1/social-search"].description,
+              requestBody: {
+                required: true,
+                content: {
+                  "application/json": { schema: MCP_TOOLS[0].inputSchema },
+                },
+              },
+              responses: {
+                200: { description: "Structured social media search results" },
+                402: { description: "x402 Payment Required ($0.02 USDC on Base)" },
+              },
+            },
+          },
+          "/v1/maps-leads": {
+            post: {
+              operationId: "mapsLeads",
+              summary: PRICING["/v1/maps-leads"].description,
+              requestBody: {
+                required: true,
+                content: {
+                  "application/json": { schema: MCP_TOOLS[1].inputSchema },
+                },
+              },
+              responses: {
+                200: { description: "Enriched local business leads with phone and website" },
+                402: { description: "x402 Payment Required ($0.03 USDC on Base)" },
+              },
+            },
+          },
+        },
+      });
+    }
+
+    // 3. A2A & x402 Discovery Manifests
     if (
       req.method === "GET" &&
       (pathname === "/.well-known/agent.json" ||
         pathname === "/.well-known/x402.json" ||
+        pathname === "/.well-known/x402" ||
         pathname === "/")
     ) {
       return sendJson(res, 200, {
@@ -132,6 +182,10 @@ export function createAppServer() {
           asset: "USDC",
           payTo: CONFIG.payToWallet,
         },
+        resources: [
+          `${baseUrl}/v1/social-search`,
+          `${baseUrl}/v1/maps-leads`,
+        ],
         endpoints: PRICING,
         mcp: {
           endpoint: `${baseUrl}/mcp`,
@@ -140,8 +194,11 @@ export function createAppServer() {
       });
     }
 
-    // 3. Paid x402 Endpoints: /v1/social-search and /v1/maps-leads
-    if (req.method === "POST" && (pathname === "/v1/social-search" || pathname === "/v1/maps-leads")) {
+    // 4. Paid x402 Endpoints: /v1/social-search and /v1/maps-leads (Supports both GET and POST for x402scan probes!)
+    if (
+      (req.method === "POST" || req.method === "GET") &&
+      (pathname === "/v1/social-search" || pathname === "/v1/maps-leads")
+    ) {
       const resourceUrl = `${baseUrl}${pathname}`;
       const auth = await verifyAndSettlePayment(req, pathname, resourceUrl);
 
@@ -150,7 +207,11 @@ export function createAppServer() {
       }
 
       try {
-        const body = await readJsonBody(req);
+        const body =
+          req.method === "POST"
+            ? await readJsonBody(req)
+            : Object.fromEntries(urlObj.searchParams.entries());
+
         const data =
           pathname === "/v1/social-search"
             ? await socialSearch(body)
@@ -176,8 +237,7 @@ export function createAppServer() {
       }
     }
 
-    // 4. MCP HTTP Endpoint (JSON-RPC 2.0)
-    // Discovery (initialize & tools/list) is open for registries; execution (tools/call) is gated by x402 / API key!
+    // 5. MCP HTTP Endpoint (JSON-RPC 2.0)
     if (req.method === "POST" && pathname === "/mcp") {
       try {
         const rpc = await readJsonBody(req);
