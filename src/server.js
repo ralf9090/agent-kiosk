@@ -4,6 +4,12 @@ import { CONFIG, PRICING, verifyAndSettlePayment } from "./x402.js";
 
 const PORT = Number(process.env.PORT || 4020);
 
+// Minimal 16x16 valid ICO binary (base64) so x402scan /favicon.ico check passes cleanly
+const FAVICON_ICO = Buffer.from(
+  "AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAQAQAAAAAAAAAAAAAAAAAAAAAAAD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A",
+  "base64"
+);
+
 export const MCP_TOOLS = [
   {
     name: "social_search",
@@ -77,8 +83,10 @@ function sendJson(res, statusCode, payload, extraHeaders = {}) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, X-PAYMENT, X-API-KEY, Authorization",
-    "Access-Control-Expose-Headers": "X-PAYMENT-RESPONSE",
+    "Access-Control-Allow-Headers":
+      "Content-Type, PAYMENT-SIGNATURE, X-PAYMENT, X-API-KEY, Authorization",
+    "Access-Control-Expose-Headers":
+      "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE",
     ...extraHeaders,
   });
   res.end(JSON.stringify(payload, null, 2));
@@ -96,18 +104,27 @@ export function createAppServer() {
     const urlObj = new URL(req.url || "/", baseUrl);
     const pathname = urlObj.pathname;
 
+    // 0. Favicon for x402scan icon verification
+    if (req.method === "GET" && pathname === "/favicon.ico") {
+      res.writeHead(200, {
+        "Content-Type": "image/x-icon",
+        "Cache-Control": "public, max-age=86400",
+      });
+      return res.end(FAVICON_ICO);
+    }
+
     // 1. Agent Discovery: /llms.txt
     if (req.method === "GET" && pathname === "/llms.txt") {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
       return res.end(
         [
-          "# Agent Kiosk — Instant Pay-Per-Call Data API (x402 & MCP)",
+          "# Agent Kiosk — Instant Pay-Per-Call Data API (x402 v2 & MCP)",
           "",
-          "> No sign-up, no monthly subscription. Autonomous AI agents can query live social discussions and verified local business leads using HTTP x402 (Base USDC) or MCP.",
+          "> No sign-up, no monthly subscription. Autonomous AI agents can query live social discussions and verified local business leads using HTTP x402 v2 (Base USDC) or MCP.",
           "",
           "## Endpoints",
-          `- POST ${baseUrl}/v1/social-search (${PRICING["/v1/social-search"].priceUsd} USDC via x402): Live Reddit & HackerNews discussions in clean JSON/Markdown.`,
-          `- POST ${baseUrl}/v1/maps-leads (${PRICING["/v1/maps-leads"].priceUsd} USDC via x402): Business name, phone, website, address, and coordinates.`,
+          `- POST ${baseUrl}/v1/social-search ($${PRICING["/v1/social-search"].priceUsd} USDC via x402): Live Reddit & HackerNews discussions in clean JSON/Markdown.`,
+          `- POST ${baseUrl}/v1/maps-leads ($${PRICING["/v1/maps-leads"].priceUsd} USDC via x402): Business name, phone, website, address, and coordinates.`,
           `- POST ${baseUrl}/mcp : Model Context Protocol (JSON-RPC 2.0) server endpoint.`,
           `- GET ${baseUrl}/.well-known/x402.json : A2A & x402 machine discovery manifest.`,
           `- GET ${baseUrl}/openapi.json : OpenAPI 3.1 specification.`,
@@ -115,15 +132,22 @@ export function createAppServer() {
       );
     }
 
-    // 2. OpenAPI 3.1 Spec for automated agent & x402scan discovery
+    // 2. OpenAPI 3.1 Spec with x402scan v2 discovery metadata & contact email
     if (req.method === "GET" && pathname === "/openapi.json") {
       return sendJson(res, 200, {
         openapi: "3.1.0",
         info: {
           title: "Agent Kiosk B2A API",
-          version: "1.0.0",
+          version: "2.0.0",
           description:
-            "Instant Pay-Per-Call Social Search & Local Business Leads for AI Agents via x402 (Base USDC) and MCP.",
+            "Instant Pay-Per-Call Social Search & Local Business Leads for AI Agents via x402 v2 (Base USDC) and MCP.",
+          contact: {
+            name: "Agent Kiosk Support",
+            email: "ralf9090@users.noreply.github.com",
+            url: "https://github.com/ralf9090/agent-kiosk",
+          },
+          "x-guidance":
+            "Call POST /v1/social-search for live Reddit & HackerNews intelligence or POST /v1/maps-leads for verified business leads with phone and website. Unauthenticated requests return an HTTP 402 challenge with PAYMENT-REQUIRED header on Base (eip155:8453).",
         },
         servers: [{ url: baseUrl }],
         paths: {
@@ -131,6 +155,14 @@ export function createAppServer() {
             post: {
               operationId: "socialSearch",
               summary: PRICING["/v1/social-search"].description,
+              "x-payment-info": {
+                protocols: [{ x402: {} }],
+                price: {
+                  mode: "fixed",
+                  currency: "USD",
+                  amount: PRICING["/v1/social-search"].priceUsd,
+                },
+              },
               requestBody: {
                 required: true,
                 content: {
@@ -139,7 +171,7 @@ export function createAppServer() {
               },
               responses: {
                 200: { description: "Structured social media search results" },
-                402: { description: "x402 Payment Required ($0.02 USDC on Base)" },
+                402: { description: "x402 v2 Payment Required ($0.02 USDC on Base)" },
               },
             },
           },
@@ -147,6 +179,14 @@ export function createAppServer() {
             post: {
               operationId: "mapsLeads",
               summary: PRICING["/v1/maps-leads"].description,
+              "x-payment-info": {
+                protocols: [{ x402: {} }],
+                price: {
+                  mode: "fixed",
+                  currency: "USD",
+                  amount: PRICING["/v1/maps-leads"].priceUsd,
+                },
+              },
               requestBody: {
                 required: true,
                 content: {
@@ -155,7 +195,7 @@ export function createAppServer() {
               },
               responses: {
                 200: { description: "Enriched local business leads with phone and website" },
-                402: { description: "x402 Payment Required ($0.03 USDC on Base)" },
+                402: { description: "x402 v2 Payment Required ($0.03 USDC on Base)" },
               },
             },
           },
@@ -173,13 +213,14 @@ export function createAppServer() {
     ) {
       return sendJson(res, 200, {
         name: "Agent Kiosk",
-        version: "1.0.0",
+        version: "2.0.0",
+        x402Version: 2,
         description:
-          "Autonomous B2A Data Vending Machine: Instant Social Search & Business Leads via x402 and MCP.",
+          "Autonomous B2A Data Vending Machine: Instant Social Search & Business Leads via x402 v2 and MCP.",
         protocols: ["x402", "mcp", "rest"],
         payment: {
           network: CONFIG.network,
-          asset: "USDC",
+          asset: CONFIG.usdcAsset,
           payTo: CONFIG.payToWallet,
         },
         resources: [
@@ -194,7 +235,7 @@ export function createAppServer() {
       });
     }
 
-    // 4. Paid x402 Endpoints: /v1/social-search and /v1/maps-leads (Supports both GET and POST for x402scan probes!)
+    // 4. Paid x402 v2 Endpoints: /v1/social-search and /v1/maps-leads
     if (
       (req.method === "POST" || req.method === "GET") &&
       (pathname === "/v1/social-search" || pathname === "/v1/maps-leads")
@@ -203,7 +244,9 @@ export function createAppServer() {
       const auth = await verifyAndSettlePayment(req, pathname, resourceUrl);
 
       if (!auth.authorized) {
-        return sendJson(res, auth.statusCode, auth.challenge);
+        return sendJson(res, auth.statusCode, auth.challenge, {
+          "PAYMENT-REQUIRED": auth.challengeHeader,
+        });
       }
 
       try {
@@ -218,7 +261,10 @@ export function createAppServer() {
             : await mapsLeads(body);
 
         const extraHeaders = auth.settlementHeader
-          ? { "X-PAYMENT-RESPONSE": auth.settlementHeader }
+          ? {
+              "PAYMENT-RESPONSE": auth.settlementHeader,
+              "X-PAYMENT-RESPONSE": auth.settlementHeader,
+            }
           : {};
 
         return sendJson(
@@ -250,7 +296,7 @@ export function createAppServer() {
             result: {
               protocolVersion: "2024-11-05",
               capabilities: { tools: {} },
-              serverInfo: { name: "agent-kiosk", version: "1.0.0" },
+              serverInfo: { name: "agent-kiosk", version: "2.0.0" },
             },
           });
         }
@@ -271,7 +317,9 @@ export function createAppServer() {
 
           const auth = await verifyAndSettlePayment(req, mappedRoute, `${baseUrl}/mcp`);
           if (!auth.authorized) {
-            return sendJson(res, 402, auth.challenge);
+            return sendJson(res, 402, auth.challenge, {
+              "PAYMENT-REQUIRED": auth.challengeHeader,
+            });
           }
 
           let output;
@@ -288,7 +336,10 @@ export function createAppServer() {
           }
 
           const extraHeaders = auth.settlementHeader
-            ? { "X-PAYMENT-RESPONSE": auth.settlementHeader }
+            ? {
+                "PAYMENT-RESPONSE": auth.settlementHeader,
+                "X-PAYMENT-RESPONSE": auth.settlementHeader,
+              }
             : {};
 
           return sendJson(

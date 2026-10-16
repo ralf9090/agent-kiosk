@@ -1,146 +1,77 @@
 /**
- * x402 Payment Protocol Middleware & Verification + Settlement Layer
- * Implements the full HTTP 402 Payment Required specification (including x402scan outputSchema):
- * 1. Challenge generation (HTTP 402 + accepts array with input/output schema for x402scan & Bazaar)
- * 2. Cryptographic signature verification (/verify)
- * 3. On-chain settlement (/settle) so USDC is actually transferred to payToWallet
+ * x402 v2 Payment Protocol Middleware & Verification + Settlement Layer
+ * Implements the HTTP 402 Payment Required v2 specification:
+ * 1. Challenge generation (x402Version: 2 + CAIP-2 network "eip155:8453" + PAYMENT-REQUIRED base64 header)
+ * 2. Cryptographic signature verification (/verify) supporting both PAYMENT-SIGNATURE (v2) and X-PAYMENT (v1)
+ * 3. On-chain settlement (/settle) returning PAYMENT-RESPONSE header
  * 4. Optional API_SECRET_KEY header for prepaid / Apify / Smithery B2B integrations
  */
 
 export const CONFIG = {
   // Base / Ethereum wallet address receiving USDC micropayments
   payToWallet: process.env.PAY_TO_WALLET || "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95",
-  network: process.env.X402_NETWORK || "base",
+  // CAIP-2 chain ID for Base Mainnet (8453)
+  network: process.env.X402_NETWORK || "eip155:8453",
   // Base Mainnet USDC contract address
   usdcAsset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   facilitatorUrl: process.env.X402_FACILITATOR_URL || "https://x402.org/facilitator",
-  // Never fallback to a hardcoded key in production; only active if explicitly configured
   apiSecretKey: process.env.API_SECRET_KEY || null,
 };
 
 export const PRICING = {
   "/v1/social-search": {
-    priceUsd: "$0.02",
-    maxAmountRequired: "20000", // 0.02 USDC (6 decimals)
+    priceUsd: "0.02",
+    amount: "20000", // 0.02 USDC (6 decimals)
     description:
       "Real-time social media search (Reddit, HackerNews) returning clean JSON & Markdown for AI agents.",
     mimeType: "application/json",
-    outputSchema: {
-      input: {
-        type: "http",
-        method: "POST",
-        bodyType: "json",
-        bodyFields: {
-          query: {
-            type: "string",
-            required: true,
-            description: "Search keywords or topic (e.g., 'AI agents', 'Stripe alternatives')",
-          },
-          platform: {
-            type: "string",
-            required: false,
-            description: "Platform filter: 'all', 'reddit', or 'hn'",
-          },
-          limit: {
-            type: "number",
-            required: false,
-            description: "Max results (1-25, default 10)",
-          },
-        },
-      },
-      output: {
-        ok: { type: "boolean" },
-        data: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-            count: { type: "number" },
-            items: { type: "array" },
-            llm_markdown: { type: "string" },
-          },
-        },
-      },
-    },
   },
   "/v1/maps-leads": {
-    priceUsd: "$0.03",
-    maxAmountRequired: "30000", // 0.03 USDC (6 decimals)
+    priceUsd: "0.03",
+    amount: "30000", // 0.03 USDC (6 decimals)
     description:
       "Local business lead extractor returning company name, phone, website, address, and coordinates.",
     mimeType: "application/json",
-    outputSchema: {
-      input: {
-        type: "http",
-        method: "POST",
-        bodyType: "json",
-        bodyFields: {
-          query: {
-            type: "string",
-            required: true,
-            description: "Business category or keyword (e.g., 'cafe', 'dentist', 'lawyer')",
-          },
-          location: {
-            type: "string",
-            required: false,
-            description: "City or region (e.g., 'San Francisco', 'London', 'Istanbul')",
-          },
-          limit: {
-            type: "number",
-            required: false,
-            description: "Max leads to return (1-25, default 10)",
-          },
-        },
-      },
-      output: {
-        ok: { type: "boolean" },
-        data: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-            location: { type: "string" },
-            count: { type: "number" },
-            leads: { type: "array" },
-            llm_markdown: { type: "string" },
-          },
-        },
-      },
-    },
   },
 };
 
 /**
- * Build standard x402 402 Payment Required response body (compliant with x402scan strict validator)
+ * Build standard x402 v2 PaymentRequired response body and PAYMENT-REQUIRED base64 header
  */
 export function build402Challenge(routePath, resourceUrl) {
   const route = PRICING[routePath] || PRICING["/v1/social-search"];
 
-  return {
-    x402Version: 1,
-    error: "X-PAYMENT header is required to access this agent endpoint.",
+  const body = {
+    x402Version: 2,
+    error: "PAYMENT-SIGNATURE header is required",
+    resource: {
+      url: resourceUrl,
+      description: route.description,
+      mimeType: route.mimeType,
+    },
     accepts: [
       {
         scheme: "exact",
         network: CONFIG.network,
-        maxAmountRequired: route.maxAmountRequired,
-        resource: resourceUrl,
-        description: route.description,
-        mimeType: route.mimeType,
+        amount: route.amount,
+        asset: CONFIG.usdcAsset,
         payTo: CONFIG.payToWallet,
         maxTimeoutSeconds: 60,
-        asset: CONFIG.usdcAsset,
-        outputSchema: route.outputSchema,
         extra: {
           name: "USD Coin",
           version: "2",
-          priceDisplay: route.priceUsd,
         },
       },
     ],
   };
+
+  const headerBase64 = Buffer.from(JSON.stringify(body)).toString("base64");
+
+  return { body, headerBase64 };
 }
 
 /**
- * Verify AND settle incoming x402 payment header (or validate configured API_SECRET_KEY)
+ * Verify AND settle incoming x402 v2/v1 payment header (or validate configured API_SECRET_KEY)
  */
 export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
   // 1. Check explicit API_SECRET_KEY (only if configured in environment)
@@ -152,15 +83,16 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
     return { authorized: true, mode: "api-key", settlementHeader: null };
   }
 
-  // 2. Require x402 X-PAYMENT header
-  const paymentHeader = req.headers["x-payment"];
-  const challenge = build402Challenge(routePath, resourceUrl);
+  // 2. Require x402 PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header
+  const paymentHeader = req.headers["payment-signature"] || req.headers["x-payment"];
+  const { body: challenge, headerBase64 } = build402Challenge(routePath, resourceUrl);
 
   if (!paymentHeader) {
     return {
       authorized: false,
       statusCode: 402,
       challenge,
+      challengeHeader: headerBase64,
     };
   }
 
@@ -174,7 +106,8 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        x402Version: 1,
+        x402Version: 2,
+        paymentPayload: decoded,
         paymentHeader,
         paymentRequirements,
       }),
@@ -189,6 +122,7 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
           ...challenge,
           error: `Facilitator verification failed (HTTP ${verifyRes.status}).`,
         },
+        challengeHeader: headerBase64,
       };
     }
 
@@ -199,8 +133,9 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
         statusCode: 402,
         challenge: {
           ...challenge,
-          error: verifyData.invalidReason || "Invalid or expired X-PAYMENT signature.",
+          error: verifyData.invalidReason || "Invalid or expired PAYMENT-SIGNATURE.",
         },
+        challengeHeader: headerBase64,
       };
     }
 
@@ -209,7 +144,8 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        x402Version: 1,
+        x402Version: 2,
+        paymentPayload: decoded,
         paymentHeader,
         paymentRequirements,
       }),
@@ -224,6 +160,7 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
           ...challenge,
           error: `On-chain payment settlement failed (HTTP ${settleRes.status}).`,
         },
+        challengeHeader: headerBase64,
       };
     }
 
@@ -236,6 +173,7 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
           ...challenge,
           error: settleData.error || "Payment settlement was rejected on-chain.",
         },
+        challengeHeader: headerBase64,
       };
     }
 
@@ -254,8 +192,9 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
       statusCode: 402,
       challenge: {
         ...challenge,
-        error: `Malformed X-PAYMENT payload: ${err.message}`,
+        error: `Malformed PAYMENT-SIGNATURE payload: ${err.message}`,
       },
+      challengeHeader: headerBase64,
     };
   }
 }
