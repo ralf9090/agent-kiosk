@@ -126,9 +126,20 @@ async function geocodeLocation(location) {
   if (!feat) return null;
 
   const [lon, lat] = feat.geometry?.coordinates || [0, 0];
+  const ext = feat.properties?.extent; // [minLon, maxLat, maxLon, minLat]
+  let bbox = `${(lon - 0.35).toFixed(4)},${(lat - 0.25).toFixed(4)},${(lon + 0.35).toFixed(4)},${(lat + 0.25).toFixed(4)}`;
+  if (Array.isArray(ext) && ext.length === 4) {
+    const minLon = Math.min(ext[0], ext[2]) - 0.05;
+    const maxLon = Math.max(ext[0], ext[2]) + 0.05;
+    const minLat = Math.min(ext[1], ext[3]) - 0.05;
+    const maxLat = Math.max(ext[1], ext[3]) + 0.05;
+    bbox = `${minLon.toFixed(4)},${minLat.toFixed(4)},${maxLon.toFixed(4)},${maxLat.toFixed(4)}`;
+  }
+
   return {
     lat,
     lon,
+    bbox,
     resolvedName: [feat.properties?.name, feat.properties?.state, feat.properties?.country]
       .filter(Boolean)
       .join(", "),
@@ -150,9 +161,9 @@ export async function mapsLeads({ query, location = "", limit = 10 }) {
     geo = await geocodeLocation(location.trim());
   }
 
-  const candidateLimit = Math.min(safeLimit * 3, 45);
-  const biasParams = geo ? `&lat=${geo.lat}&lon=${geo.lon}&zoom=14` : "";
-  const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=${candidateLimit}${biasParams}`;
+  const candidateLimit = Math.min(Math.max(safeLimit * 4, 25), 45);
+  const geoParams = geo ? `&bbox=${geo.bbox}&lat=${geo.lat}&lon=${geo.lon}` : "";
+  const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=${candidateLimit}${geoParams}`;
 
   const res = await fetch(photonUrl, {
     headers: { "User-Agent": USER_AGENT },
