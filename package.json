@@ -1,0 +1,23 @@
+{
+  "name": "agent-kiosk",
+  "version": "1.0.0",
+  "description": "B2A Data Vending Machine: Live Social Search & Business Leads via x402 Micropayments and MCP",
+  "type": "module",
+  "main": "src/server.js",
+  "bin": {
+    "agent-kiosk-mcp": "./src/mcp-stdio.js"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "mcp": "node src/mcp-stdio.js",
+    "test": "node test/verify.js"
+  },
+  "keywords": [
+    "x402",
+    "mcp",
+    "ai-agents",
+    "b2a",
+    "social-search",
+    "maps-leads"
+  ]
+}

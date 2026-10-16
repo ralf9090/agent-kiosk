@@ -1,0 +1,17 @@
+# Smithery.ai MCP Registry configuration
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      apiKey:
+        type: string
+        description: "Optional API key for prepaid access (or pay per call via x402)"
+  commandFunction: |-
+    (config) => ({
+      command: 'node',
+      args: ['src/mcp-stdio.js'],
+      env: {
+        API_SECRET_KEY: config.apiKey || ''
+      }
+    })
