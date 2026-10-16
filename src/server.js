@@ -380,13 +380,79 @@ export function createAppServer() {
         ...Object.entries(PRICING).map(
           ([route, info]) => `- POST ${baseUrl}${route} ($${info.priceUsd} USDC): ${info.description}`
         ),
-        `- POST ${baseUrl}/mcp : Model Context Protocol (JSON-RPC 2.0) server endpoint (8 tools).`,
+        `- POST ${baseUrl}/mcp : Model Context Protocol (JSON-RPC 2.0) server endpoint (12 tools).`,
+        `- GET ${baseUrl}/llms-full.txt : Full LLM tool schemas & integration reference.`,
         `- GET ${baseUrl}/openapi.json : OpenAPI 3.1 specification.`,
       ];
       return res.end(lines.join("\n"));
     }
 
-    // 2. OpenAPI 3.1 Spec with full input & output schemas for all 8 endpoints
+    // 1b. Extended LLM Reference: /llms-full.txt
+    if (req.method === "GET" && pathname === "/llms-full.txt") {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      const blocks = MCP_TOOLS.map((t) => {
+        const route = TOOL_TO_ROUTE[t.name];
+        const p = PRICING[route];
+        return `### Tool: ${t.name}\n- **x402 Endpoint:** POST ${baseUrl}${route}\n- **Price:** $${p.priceUsd} USDC on Base (${CONFIG.network})\n- **PayTo Wallet:** ${CONFIG.payToWallet}\n- **Description:** ${t.description}\n- **Input Schema:** \`${JSON.stringify(t.inputSchema)}\``;
+      });
+      return res.end(
+        [
+          "# Agent Kiosk — Complete LLM & Autonomous Agent Integration Reference",
+          "",
+          `Base URL: ${baseUrl}`,
+          `MCP Streamable-HTTP Endpoint: ${baseUrl}/mcp`,
+          `Smithery MCP URL: https://agent-kiosk--batuhansenavci.run.tools`,
+          `Official MCP Registry ID: io.github.ralf9090/agent-kiosk`,
+          `x402scan Server ID: a1af2789-615a-4324-b3f1-83b97834ece8`,
+          "",
+          "## Available Tools (12)",
+          "",
+          ...blocks,
+        ].join("\n\n")
+      );
+    }
+
+    // 1c. IndexNow Verification Key File
+    if (req.method === "GET" && pathname === "/a1af2789615a4324b3f183b97834ece8.txt") {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      return res.end("a1af2789615a4324b3f183b97834ece8");
+    }
+
+    // 1d. Standard MCP & AI Plugin Discovery Manifests
+    if (req.method === "GET" && pathname === "/.well-known/mcp.json") {
+      return sendJson(res, 200, {
+        mcpVersion: "2024-11-05",
+        name: "io.github.ralf9090/agent-kiosk",
+        title: "Agent Kiosk — 12-in-1 B2A Intelligence & x402 API",
+        version: "2.3.0",
+        description:
+          "12-in-1 autonomous intelligence MCP server & x402 API: DeFi order-flow alpha, whale wallet profiler, smart contract security audit, prediction markets, DeFi yields, B2B leads & research.",
+        endpoints: {
+          streamableHttp: `${baseUrl}/mcp`,
+          smithery: "https://agent-kiosk--batuhansenavci.run.tools",
+        },
+        tools: MCP_TOOLS,
+      });
+    }
+
+    if (req.method === "GET" && pathname === "/.well-known/ai-plugin.json") {
+      return sendJson(res, 200, {
+        schema_version: "v1",
+        name_for_human: "Agent Kiosk",
+        name_for_model: "agent_kiosk",
+        description_for_human:
+          "12-in-1 B2A Intelligence API & MCP Server: DeFi Alpha, Whale Wallet Profiler, Security Audits, B2B Leads & Research.",
+        description_for_model:
+          "Query live social discussions, local business leads with phone/email, clean web markdown with prompt-injection scanning, 0x token/contract honeypot audits, DEX buy/sell order-flow alpha, multi-chain whale wallet balances, prediction market odds, DeFi yields, domain DNS/SaaS intelligence, package CVE checks, academic papers, and GitHub repo stats.",
+        auth: { type: "none" },
+        api: { type: "openapi", url: `${baseUrl}/openapi.json` },
+        logo_url: `${baseUrl}/favicon.ico`,
+        contact_email: "ralf9090@users.noreply.github.com",
+        legal_info_url: "https://github.com/ralf9090/agent-kiosk/blob/main/LICENSE",
+      });
+    }
+
+    // 2. OpenAPI 3.1 Spec with full input & output schemas for all 12 endpoints
     if (req.method === "GET" && pathname === "/openapi.json") {
       const openApiPaths = {};
       for (const tool of MCP_TOOLS) {
@@ -416,9 +482,9 @@ export function createAppServer() {
         openapi: "3.1.0",
         info: {
           title: "Agent Kiosk B2A API",
-          version: "2.2.0",
+          version: "2.3.0",
           description:
-            "8-in-1 Pay-Per-Call Intelligence Supermarket for AI Agents: Social Search, Business Leads, Clean Web Extraction, Smart Contract Security, DeFi Order-Flow Alpha, Domain Intelligence, Package CVE Audits, and Academic Research via x402 v2 (Base USDC) and MCP.",
+            "12-in-1 Pay-Per-Call Intelligence Supermarket for AI Agents: Social Search, Business Leads, Clean Web Extraction, Smart Contract Security, DeFi Order-Flow Alpha, Whale Wallet Profiler, Prediction Markets, DeFi Yields, Domain Intelligence, Package CVE Audits, Academic Research, and GitHub Intelligence via x402 v2 (Base USDC) and MCP.",
           contact: {
             name: "Agent Kiosk Support",
             email: "ralf9090@users.noreply.github.com",
@@ -432,17 +498,81 @@ export function createAppServer() {
       });
     }
 
-    // 2b. SEO & AI Crawler Indexing: /robots.txt & /sitemap.xml
+    // 2b. SEO & AI Crawler Indexing: /robots.txt & /sitemap.xml (16 URLs)
     if (req.method === "GET" && pathname === "/robots.txt") {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
       return res.end(`User-agent: *\nAllow: /\nSitemap: ${baseUrl}/sitemap.xml\n`);
     }
 
     if (req.method === "GET" && pathname === "/sitemap.xml") {
+      const toolUrls = Object.keys(ROUTE_HANDLERS).map(
+        (r) => `  <url><loc>${baseUrl}/tools/${r.replace("/v1/", "")}</loc></url>`
+      );
       res.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
       return res.end(
-        `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${baseUrl}/</loc></url>\n  <url><loc>${baseUrl}/llms.txt</loc></url>\n  <url><loc>${baseUrl}/openapi.json</loc></url>\n</urlset>`
+        [
+          `<?xml version="1.0" encoding="UTF-8"?>`,
+          `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`,
+          `  <url><loc>${baseUrl}/</loc></url>`,
+          `  <url><loc>${baseUrl}/llms.txt</loc></url>`,
+          `  <url><loc>${baseUrl}/llms-full.txt</loc></url>`,
+          `  <url><loc>${baseUrl}/openapi.json</loc></url>`,
+          ...toolUrls,
+          `</urlset>`,
+        ].join("\n")
       );
+    }
+
+    // 2c. Individual SEO Tool Landing Pages: GET /tools/:slug
+    if (req.method === "GET" && pathname.startsWith("/tools/")) {
+      const slug = pathname.replace("/tools/", "").trim();
+      const route = `/v1/${slug}`;
+      const tool = MCP_TOOLS.find((t) => TOOL_TO_ROUTE[t.name] === route);
+      const price = PRICING[route];
+
+      if (tool && price) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        return res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${tool.name} — x402 USDC API & MCP Tool | Agent Kiosk</title>
+  <meta name="description" content="${price.description}" />
+  <script type="application/ld+json">${JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "WebAPI",
+    name: `Agent Kiosk - ${tool.name}`,
+    description: tool.description,
+    documentation: `${baseUrl}/openapi.json`,
+    url: `${baseUrl}${route}`,
+    offers: {
+      "@type": "Offer",
+      price: price.priceUsd,
+      priceCurrency: "USD",
+    },
+  })}</script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b0f19; color:#e2e8f0; max-width:880px; margin:0 auto; padding:32px 20px; line-height:1.6; }
+    a { color:#38bdf8; }
+    code, pre { background:#111827; color:#a7f3d0; padding:4px 8px; border-radius:6px; border:1px solid #1f2937; }
+    pre { padding:16px; overflow-x:auto; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← Back to Agent Kiosk (All 12 Tools)</a></p>
+  <h1>⚡ <code>${tool.name}</code> — x402 v2 & MCP Tool</h1>
+  <p>${tool.description}</p>
+  <ul>
+    <li><strong>x402 Endpoint:</strong> <code>POST ${baseUrl}${route}</code></li>
+    <li><strong>Price:</strong> <strong>$${price.priceUsd} USDC</strong> on Base Mainnet (<code>${CONFIG.network}</code>)</li>
+    <li><strong>MCP Endpoint:</strong> <code>${baseUrl}/mcp</code> (Tool name: <code>${tool.name}</code>)</li>
+  </ul>
+  <h2>Input JSON Schema</h2>
+  <pre>${JSON.stringify(tool.inputSchema, null, 2)}</pre>
+</body>
+</html>`);
+      }
     }
 
     // 3. Browser Storefront on GET / (when Accept includes text/html) + A2A/x402 JSON Discovery Manifests
@@ -453,8 +583,9 @@ export function createAppServer() {
     ) {
       const toolRows = MCP_TOOLS.map((t) => {
         const route = TOOL_TO_ROUTE[t.name];
+        const slug = route.replace("/v1/", "");
         const p = PRICING[route];
-        return `<tr><td><code>${t.name}</code></td><td><code>POST ${route}</code></td><td><strong>$${p.priceUsd} USDC</strong></td><td>${p.description}</td></tr>`;
+        return `<tr><td><a href="/tools/${slug}" style="color:#38bdf8;text-decoration:none;"><code>${t.name}</code></a></td><td><code>POST ${route}</code></td><td><strong>$${p.priceUsd} USDC</strong></td><td>${p.description}</td></tr>`;
       }).join("");
 
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -468,7 +599,7 @@ export function createAppServer() {
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b0f19; color:#e2e8f0; max-width:1040px; margin:0 auto; padding:32px 20px; line-height:1.6; }
     h1, h2 { color:#fff; }
-    .badges a { display:inline-block; margin-right:10px; padding:6px 12px; border-radius:6px; background:#1e293b; color:#38bdf8; text-decoration:none; font-weight:600; font-size:14px; border:1px solid #334155; }
+    .badges a { display:inline-block; margin-right:10px; margin-bottom:8px; padding:6px 12px; border-radius:6px; background:#1e293b; color:#38bdf8; text-decoration:none; font-weight:600; font-size:14px; border:1px solid #334155; }
     table { width:100%; border-collapse:collapse; margin:20px 0; background:#111827; border-radius:8px; overflow:hidden; }
     th, td { padding:12px 14px; text-align:left; border-bottom:1px solid #1f2937; font-size:14px; }
     th { background:#1e293b; color:#94a3b8; }
@@ -480,10 +611,11 @@ export function createAppServer() {
   <h1>⚡ Agent Kiosk — 12-in-1 Autonomous B2A Intelligence Supermarket</h1>
   <p>No API keys, no sign-ups, no monthly subscriptions. Built for autonomous AI agents paying per request via <strong>x402 v2 (Base USDC)</strong> or connecting via <strong>Model Context Protocol (MCP)</strong>.</p>
   <div class="badges">
-    <a href="https://www.x402scan.com/server/a1af2789-615a-4324-b3f1-83b97834ece8">🔵 View on x402scan (12/12 Verified)</a>
-    <a href="https://smithery.ai/servers/batuhansenavci/agent-kiosk">🟠 View on Smithery.ai</a>
-    <a href="/openapi.json">📄 OpenAPI 3.1 Spec</a>
-    <a href="/llms.txt">🤖 /llms.txt</a>
+    <a href="https://www.x402scan.com/server/a1af2789-615a-4324-b3f1-83b97834ece8">🔵 x402scan (12/12 Verified)</a>
+    <a href="https://smithery.ai/servers/batuhansenavci/agent-kiosk">🟠 Smithery.ai</a>
+    <a href="https://registry.modelcontextprotocol.io/v0/servers?search=agent-kiosk">🟣 Official MCP Registry</a>
+    <a href="/openapi.json">📄 OpenAPI 3.1</a>
+    <a href="/llms-full.txt">🤖 /llms-full.txt</a>
     <a href="/.well-known/x402.json">⚡ /.well-known/x402.json</a>
   </div>
   <h2>12 Live Endpoints & MCP Tools (Base Mainnet USDC)</h2>
@@ -491,7 +623,7 @@ export function createAppServer() {
     <thead><tr><th>MCP Tool</th><th>x402 Endpoint</th><th>Price</th><th>Description</th></tr></thead>
     <tbody>${toolRows}</tbody>
   </table>
-  <h2>Quick Connect (MCP Client / Claude / Cursor)</h2>
+  <h2>Quick Connect (MCP Client / Claude / Cursor / VS Code)</h2>
   <pre>{
   "mcpServers": {
     "agent-kiosk": {

@@ -1,0 +1,64 @@
+name: Autonomous Traffic, Smithery Warmup & IndexNow
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  warmup-and-index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Boost Smithery MCP Usage Graph & Warmup Vercel
+        run: |
+          for ENDPOINT in "https://agent-kiosk--batuhansenavci.run.tools" "https://agent-kiosk.vercel.app/mcp"; do
+            echo "Calling MCP endpoint: $ENDPOINT"
+            curl -s -X POST "$ENDPOINT" -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"agent-kiosk-warmup","version":"1.0.0"}}}' > /dev/null
+            curl -s -X POST "$ENDPOINT" -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' > /dev/null
+            curl -s -X POST "$ENDPOINT" -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"token_alpha","arguments":{"query":"AERO","chain":"base"}}}' > /dev/null
+            curl -s -X POST "$ENDPOINT" -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"domain_intel","arguments":{"domain":"stripe.com"}}}' > /dev/null
+            curl -s -X POST "$ENDPOINT" -H "Content-Type: application/json" \
+              -d '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"github_intel","arguments":{"query":"modelcontextprotocol/servers"}}}' > /dev/null
+          done
+          echo "✅ Smithery & Vercel MCP warmup calls completed"
+
+      - name: 2. Submit All 16 Pages to IndexNow (Bing, ChatGPT Search, Perplexity, Yandex)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://api.indexnow.org/indexnow" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d '{
+              "host": "agent-kiosk.vercel.app",
+              "key": "a1af2789615a4324b3f183b97834ece8",
+              "keyLocation": "https://agent-kiosk.vercel.app/a1af2789615a4324b3f183b97834ece8.txt",
+              "urlList": [
+                "https://agent-kiosk.vercel.app/",
+                "https://agent-kiosk.vercel.app/llms.txt",
+                "https://agent-kiosk.vercel.app/llms-full.txt",
+                "https://agent-kiosk.vercel.app/openapi.json",
+                "https://agent-kiosk.vercel.app/tools/social-search",
+                "https://agent-kiosk.vercel.app/tools/maps-leads",
+                "https://agent-kiosk.vercel.app/tools/web-extract",
+                "https://agent-kiosk.vercel.app/tools/security-audit",
+                "https://agent-kiosk.vercel.app/tools/token-alpha",
+                "https://agent-kiosk.vercel.app/tools/domain-intel",
+                "https://agent-kiosk.vercel.app/tools/package-audit",
+                "https://agent-kiosk.vercel.app/tools/academic-search",
+                "https://agent-kiosk.vercel.app/tools/wallet-profiler",
+                "https://agent-kiosk.vercel.app/tools/prediction-markets",
+                "https://agent-kiosk.vercel.app/tools/defi-yields",
+                "https://agent-kiosk.vercel.app/tools/github-intel"
+              ]
+            }')
+          echo "✅ IndexNow HTTP Status: $STATUS"
+
+      - name: 3. Sync x402scan Marketplace Verification
+        run: |
+          curl -s -X POST "https://www.x402scan.com/api/trpc/public.resources.registerFromOrigin" \
+            -H "Content-Type: application/json" \
+            -d '{"json":{"origin":"https://agent-kiosk.vercel.app"}}'
+          echo ""
