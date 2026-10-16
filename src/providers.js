@@ -1,12 +1,18 @@
 /**
- * Real data extraction & security intelligence providers for Agent Kiosk:
+ * Real data extraction, market alpha, domain intelligence, code security & research providers for Agent Kiosk:
  * 1. socialSearch: Live Reddit + HackerNews social discussions normalized for LLMs.
  * 2. mapsLeads: Accurate city-scoped business lead finder with phone, website, address, and coordinates.
  * 3. webExtract: Clean HTML-to-Markdown web extractor with Prompt Injection trap detection.
  * 4. securityAudit: Live on-chain smart contract / token honeypot scanner (GoPlus + DexScreener) & URL phishing/injection auditor.
+ * 5. tokenAlpha: Real-time DEX order-flow (buy/sell pressure), liquidity, volume & momentum signal analyzer.
+ * 6. domainIntel: B2B domain intelligence (DNS, MX email provider, SaaS TXT fingerprints, RDAP registration, active subdomains).
+ * 7. packageAudit: Live open-source dependency auditor (npm, PyPI, crates.io) with Google OSV.dev CVE vulnerability checks.
+ * 8. academicSearch: Peer-reviewed research & preprint search (OpenAlex + arXiv) with reconstructed abstracts, citations & PDFs.
  */
 
-const USER_AGENT = "AgentKiosk/2.0 (+https://agent-kiosk.vercel.app)";
+import dns from "node:dns/promises";
+
+const USER_AGENT = "AgentKiosk/2.2 (+https://agent-kiosk.vercel.app)";
 
 /**
  * 1. Fetch live social media discussions (Reddit + HN) and return LLM-ready structured JSON.
@@ -304,7 +310,6 @@ function htmlToCleanMarkdown(html, url) {
     html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i);
   const description = descMatch ? descMatch[1].trim() : null;
 
-  // Strip scripts, styles, svg, nav, footer
   let cleaned = html
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/<style[\s\S]*?<\/style>/gi, "")
@@ -312,7 +317,6 @@ function htmlToCleanMarkdown(html, url) {
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, "")
     .replace(/<!--[\s\S]*?-->/g, "");
 
-  // Convert headings, links, paragraphs, list items
   cleaned = cleaned
     .replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, "\n# $1\n")
     .replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, "\n## $1\n")
@@ -349,11 +353,10 @@ export async function webExtract({ url, max_length = 8000 }) {
   let markdown = "";
   let rawSample = "";
 
-  // Fetch directly first for speed and raw HTML injection inspection
   try {
     const res = await fetch(targetUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; AgentKioskBot/2.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; AgentKioskBot/2.2)",
         Accept: "text/html,application/xhtml+xml,application/json,text/plain;q=0.9",
       },
       signal: AbortSignal.timeout(8000),
@@ -427,7 +430,6 @@ export async function securityAudit({ target, chain = "base" }) {
 
   const cleanTarget = target.trim();
 
-  // Case A: EVM Smart Contract / Token Address (0x...)
   if (/^0x[a-fA-F0-9]{40}$/.test(cleanTarget)) {
     const chainKey = (chain || "base").toLowerCase();
     const chainId = CHAIN_IDS[chainKey] || "8453";
@@ -453,7 +455,7 @@ export async function securityAudit({ target, chain = "base" }) {
     const topPair = dexPairs[0] || null;
 
     const risks = [];
-    let riskScore = 0; // 0 (Safe) to 100 (Critical Scam)
+    let riskScore = 0;
 
     if (gpData) {
       if (gpData.is_honeypot === "1") {
@@ -515,7 +517,6 @@ export async function securityAudit({ target, chain = "base" }) {
     };
   }
 
-  // Case B: URL Phishing & Prompt Injection Audit
   if (/^https?:\/\//i.test(cleanTarget)) {
     const extracted = await webExtract({ url: cleanTarget, max_length: 4000 });
     const risks = [];
@@ -552,4 +553,493 @@ export async function securityAudit({ target, chain = "base" }) {
   }
 
   throw new Error("Invalid 'target': Provide a 0x... smart contract address or an http(s):// URL.");
+}
+
+/**
+ * 5. Crypto & DeFi Token Alpha / Order-Flow Intelligence.
+ * Analyzes buy vs. sell transaction pressure, liquidity depth, FDV, and volume velocity across DEX pools.
+ */
+export async function tokenAlpha({ query, chain = "all" }) {
+  if (!query || typeof query !== "string" || !query.trim()) {
+    throw new Error("Missing required parameter: 'query' (token symbol like 'AERO' or contract address)");
+  }
+
+  const cleanQuery = query.trim();
+  const isAddress = /^0x[a-fA-F0-9]{40}$/.test(cleanQuery) || cleanQuery.length >= 32;
+  const endpoint = isAddress
+    ? `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(cleanQuery)}`
+    : `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(cleanQuery)}`;
+
+  const res = await fetch(endpoint, {
+    headers: { "User-Agent": USER_AGENT },
+    signal: AbortSignal.timeout(8000),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Upstream DEX provider returned HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  let pairs = data?.pairs || [];
+
+  if (chain && chain !== "all") {
+    const targetChain = chain.toLowerCase();
+    pairs = pairs.filter((p) => (p.chainId || "").toLowerCase() === targetChain);
+  }
+
+  // Sort by USD liquidity descending so main pools come first
+  pairs.sort((a, b) => Number(b.liquidity?.usd || 0) - Number(a.liquidity?.usd || 0));
+
+  if (pairs.length === 0) {
+    return {
+      query: cleanQuery,
+      chain,
+      found: false,
+      llm_summary: `No active DEX pools found for '${cleanQuery}' on chain '${chain}'.`,
+    };
+  }
+
+  const primary = pairs[0];
+  const topPools = pairs.slice(0, 5);
+
+  const totalLiquidityUsd = topPools.reduce((acc, p) => acc + Number(p.liquidity?.usd || 0), 0);
+  const totalVol24h = topPools.reduce((acc, p) => acc + Number(p.volume?.h24 || 0), 0);
+  const totalVol1h = topPools.reduce((acc, p) => acc + Number(p.volume?.h1 || 0), 0);
+
+  const buys1h = topPools.reduce((acc, p) => acc + Number(p.txns?.h1?.buys || 0), 0);
+  const sells1h = topPools.reduce((acc, p) => acc + Number(p.txns?.h1?.sells || 0), 0);
+  const totalTx1h = buys1h + sells1h;
+  const buyPressure1hPct = totalTx1h > 0 ? Number(((buys1h / totalTx1h) * 100).toFixed(1)) : 50;
+
+  const buys24h = topPools.reduce((acc, p) => acc + Number(p.txns?.h24?.buys || 0), 0);
+  const sells24h = topPools.reduce((acc, p) => acc + Number(p.txns?.h24?.sells || 0), 0);
+  const totalTx24h = buys24h + sells24h;
+  const buyPressure24hPct = totalTx24h > 0 ? Number(((buys24h / totalTx24h) * 100).toFixed(1)) : 50;
+
+  const volToLiqRatio =
+    totalLiquidityUsd > 0 ? Number((totalVol24h / totalLiquidityUsd).toFixed(2)) : 0;
+
+  let signal = "NEUTRAL";
+  if (totalLiquidityUsd < 5000) {
+    signal = "LOW_LIQUIDITY_WARNING";
+  } else if (buyPressure1hPct >= 62 && Number(primary.priceChange?.h1 || 0) > 0) {
+    signal = "STRONG_BUY_PRESSURE";
+  } else if (buyPressure1hPct >= 55) {
+    signal = "ACCUMULATION";
+  } else if (buyPressure1hPct <= 40) {
+    signal = "SELL_PRESSURE";
+  }
+
+  return {
+    query: cleanQuery,
+    found: true,
+    token: {
+      name: primary.baseToken?.name || cleanQuery,
+      symbol: primary.baseToken?.symbol || cleanQuery,
+      address: primary.baseToken?.address || null,
+      primary_chain: primary.chainId,
+      price_usd: Number(primary.priceUsd || 0),
+      market_cap_usd: primary.marketCap || primary.fdv || null,
+      fdv_usd: primary.fdv || null,
+    },
+    alpha_metrics: {
+      signal,
+      total_top5_liquidity_usd: Math.round(totalLiquidityUsd),
+      volume_1h_usd: Math.round(totalVol1h),
+      volume_24h_usd: Math.round(totalVol24h),
+      volume_to_liquidity_ratio: volToLiqRatio,
+      price_change_pct: {
+        m5: Number(primary.priceChange?.m5 || 0),
+        h1: Number(primary.priceChange?.h1 || 0),
+        h6: Number(primary.priceChange?.h6 || 0),
+        h24: Number(primary.priceChange?.h24 || 0),
+      },
+      order_flow_1h: {
+        buys: buys1h,
+        sells: sells1h,
+        buy_pressure_pct: buyPressure1hPct,
+      },
+      order_flow_24h: {
+        buys: buys24h,
+        sells: sells24h,
+        buy_pressure_pct: buyPressure24hPct,
+      },
+    },
+    top_pools: topPools.map((p) => ({
+      chain: p.chainId,
+      dex: p.dexId,
+      pair: `${p.baseToken?.symbol}/${p.quoteToken?.symbol}`,
+      pair_address: p.pairAddress,
+      price_usd: p.priceUsd,
+      liquidity_usd: p.liquidity?.usd || 0,
+      volume_24h_usd: p.volume?.h24 || 0,
+      url: p.url,
+    })),
+    llm_summary: `${primary.baseToken?.name} (${primary.baseToken?.symbol} on ${primary.chainId}): $${primary.priceUsd} | Signal: ${signal} | 1h Buy Pressure: ${buyPressure1hPct}% (${buys1h} buys vs ${sells1h} sells) | Liquidity: $${Math.round(totalLiquidityUsd).toLocaleString()} | 24h Vol: $${Math.round(totalVol24h).toLocaleString()}.`,
+  };
+}
+
+/**
+ * 6. B2B Domain & Company Infrastructure Intelligence.
+ * Resolves DNS (A, MX, TXT, NS), detects email provider & SaaS tech fingerprints, RDAP registration, and active subdomains.
+ */
+export async function domainIntel({ domain }) {
+  if (!domain || typeof domain !== "string" || !domain.trim()) {
+    throw new Error("Missing required parameter: 'domain' (e.g., 'stripe.com')");
+  }
+
+  const cleanDomain = domain
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .split("/")[0]
+    .split(":")[0];
+
+  if (!cleanDomain.includes(".")) {
+    throw new Error(`Invalid domain name: '${domain}'`);
+  }
+
+  const commonPrefixes = ["api", "app", "docs", "dev", "status", "mail", "auth", "dashboard", "blog", "cdn"];
+
+  const [aRes, mxRes, txtRes, nsRes, rdapRes, subProbeRes] = await Promise.allSettled([
+    dns.resolve4(cleanDomain),
+    dns.resolveMx(cleanDomain),
+    dns.resolveTxt(cleanDomain),
+    dns.resolveNs(cleanDomain),
+    fetch(`https://rdap.org/domain/${encodeURIComponent(cleanDomain)}`, {
+      headers: { "User-Agent": USER_AGENT, Accept: "application/rdap+json,application/json" },
+      signal: AbortSignal.timeout(4500),
+    }).then((r) => (r.ok ? r.json() : null)),
+    Promise.all(
+      commonPrefixes.map(async (sub) => {
+        const fqdn = `${sub}.${cleanDomain}`;
+        try {
+          const ips = await dns.resolve4(fqdn);
+          return ips.length > 0 ? fqdn : null;
+        } catch {
+          return null;
+        }
+      })
+    ),
+  ]);
+
+  const ipv4 = aRes.status === "fulfilled" ? aRes.value : [];
+  const mxRecords =
+    mxRes.status === "fulfilled"
+      ? mxRes.value.sort((a, b) => a.priority - b.priority).map((m) => m.exchange.toLowerCase())
+      : [];
+  const txtRecords =
+    txtRes.status === "fulfilled" ? txtRes.value.map((chunks) => chunks.join("")) : [];
+  const nameservers = nsRes.status === "fulfilled" ? nsRes.value.map((n) => n.toLowerCase()) : [];
+  const activeSubdomains =
+    subProbeRes.status === "fulfilled" ? subProbeRes.value.filter(Boolean) : [];
+
+  // Detect email provider from MX
+  let emailProvider = "None / Custom";
+  const mxJoined = mxRecords.join(" ");
+  if (mxJoined.includes("google.com") || mxJoined.includes("googlemail.com")) {
+    emailProvider = "Google Workspace";
+  } else if (mxJoined.includes("outlook.com") || mxJoined.includes("protection.outlook.com")) {
+    emailProvider = "Microsoft 365";
+  } else if (mxJoined.includes("protonmail.ch") || mxJoined.includes("proton.me")) {
+    emailProvider = "ProtonMail";
+  } else if (mxJoined.includes("zoho.")) {
+    emailProvider = "Zoho Mail";
+  } else if (mxJoined.includes("Mimecast") || mxJoined.includes("mimecast.com")) {
+    emailProvider = "Mimecast";
+  } else if (mxJoined.includes("pphosted.com")) {
+    emailProvider = "Proofpoint";
+  } else if (mxJoined.includes("cloudflare.net")) {
+    emailProvider = "Cloudflare Email Routing";
+  } else if (mxJoined.includes("amazonaws.com") || mxJoined.includes("amazonses.com")) {
+    emailProvider = "Amazon SES";
+  }
+
+  // Detect SaaS stack & security posture from TXT + NS
+  const detectedTech = new Set();
+  const txtJoined = txtRecords.join(" | ").toLowerCase();
+  const nsJoined = nameservers.join(" ");
+
+  if (nsJoined.includes("cloudflare.com")) detectedTech.add("Cloudflare DNS");
+  if (nsJoined.includes("awsdns")) detectedTech.add("AWS Route53");
+  if (nsJoined.includes("googledomains") || nsJoined.includes("google.com")) detectedTech.add("Google Cloud DNS");
+  if (nsJoined.includes("vercel-dns.com")) detectedTech.add("Vercel DNS");
+
+  const txtFingerprints = [
+    { match: "google-site-verification", label: "Google Search Console" },
+    { match: "stripe-verification", label: "Stripe" },
+    { match: "hubspot", label: "HubSpot" },
+    { match: "salesforce", label: "Salesforce" },
+    { match: "atlassian-domain-verification", label: "Atlassian (Jira/Confluence)" },
+    { match: "slack-domain-verification", label: "Slack Enterprise" },
+    { match: "openai-domain-verification", label: "OpenAI Enterprise" },
+    { match: "apple-domain-verification", label: "Apple Business / Pay" },
+    { match: "facebook-domain-verification", label: "Meta Business Suite" },
+    { match: "docusign", label: "DocuSign" },
+    { match: "zendesk", label: "Zendesk" },
+    { match: "sendgrid", label: "SendGrid" },
+    { match: "mailgun", label: "Mailgun" },
+    { match: "amazonses", label: "Amazon SES" },
+    { match: "spf1", label: "SPF Email Auth" },
+  ];
+
+  for (const fp of txtFingerprints) {
+    if (txtJoined.includes(fp.match)) detectedTech.add(fp.label);
+  }
+
+  // Parse RDAP registration metadata
+  const rdap = rdapRes.status === "fulfilled" ? rdapRes.value : null;
+  const events = rdap?.events || [];
+  const registeredAt = events.find((e) => e.eventAction === "registration")?.eventDate || null;
+  const expiresAt = events.find((e) => e.eventAction === "expiration")?.eventDate || null;
+
+  return {
+    domain: cleanDomain,
+    infrastructure: {
+      ipv4_addresses: ipv4,
+      nameservers,
+      email_provider: emailProvider,
+      mx_records: mxRecords,
+      detected_saas_and_tech: Array.from(detectedTech),
+      has_spf_record: txtJoined.includes("v=spf1"),
+    },
+    registration: {
+      registered_at: registeredAt,
+      expires_at: expiresAt,
+      status: rdap?.status || [],
+    },
+    active_subdomains: activeSubdomains,
+    txt_records: txtRecords.slice(0, 20),
+    llm_summary: `Domain: ${cleanDomain} | Email: ${emailProvider} | Tech Stack: ${
+      Array.from(detectedTech).join(", ") || "Standard"
+    } | Active Subdomains: ${activeSubdomains.join(", ") || "None detected"} | Registered: ${
+      registeredAt || "Unknown"
+    }.`,
+  };
+}
+
+/**
+ * 7. Open-Source Package & CVE Security Auditor (npm, PyPI, crates.io) powered by Google OSV.dev.
+ */
+export async function packageAudit({ name, ecosystem = "npm", version = "" }) {
+  if (!name || typeof name !== "string" || !name.trim()) {
+    throw new Error("Missing required parameter: 'name' (e.g., 'express', 'lodash', 'requests')");
+  }
+
+  const pkgName = name.trim();
+  const ecoLower = (ecosystem || "npm").toLowerCase();
+  const osvEcosystem =
+    ecoLower === "pypi" || ecoLower === "python"
+      ? "PyPI"
+      : ecoLower === "crates" || ecoLower === "crates.io" || ecoLower === "rust"
+      ? "crates.io"
+      : "npm";
+
+  // 1. Fetch package metadata from official registry
+  let latestVersion = null;
+  let description = null;
+  let license = null;
+  let repository = null;
+  let deprecated = false;
+
+  try {
+    if (osvEcosystem === "npm") {
+      const regRes = await fetch(`https://registry.npmjs.org/${encodeURIComponent(pkgName)}`, {
+        headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (regRes.ok) {
+        const reg = await regRes.json();
+        latestVersion = reg["dist-tags"]?.latest || null;
+        const latestObj = latestVersion ? reg.versions?.[latestVersion] : null;
+        description = reg.description || latestObj?.description || null;
+        license = reg.license || latestObj?.license || null;
+        repository = reg.repository?.url || latestObj?.repository?.url || null;
+        deprecated = Boolean(latestObj?.deprecated);
+      }
+    } else if (osvEcosystem === "PyPI") {
+      const regRes = await fetch(`https://pypi.org/pypi/${encodeURIComponent(pkgName)}/json`, {
+        headers: { "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (regRes.ok) {
+        const reg = await regRes.json();
+        latestVersion = reg.info?.version || null;
+        description = reg.info?.summary || null;
+        license = reg.info?.license || null;
+        repository = reg.info?.project_url || reg.info?.home_page || null;
+      }
+    } else if (osvEcosystem === "crates.io") {
+      const regRes = await fetch(`https://crates.io/api/v1/crates/${encodeURIComponent(pkgName)}`, {
+        headers: { "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (regRes.ok) {
+        const reg = await regRes.json();
+        latestVersion = reg.crate?.max_stable_version || reg.crate?.max_version || null;
+        description = reg.crate?.description || null;
+        repository = reg.crate?.repository || null;
+      }
+    }
+  } catch {
+    // Continue to OSV check even if registry lookup times out
+  }
+
+  const targetVersion = (version && version.trim()) || latestVersion;
+
+  // 2. Query Google OSV.dev for known CVEs & security advisories
+  const osvQuery = {
+    package: { name: pkgName, ecosystem: osvEcosystem },
+  };
+  if (targetVersion) {
+    osvQuery.version = targetVersion;
+  }
+
+  let vulns = [];
+  try {
+    const osvRes = await fetch("https://api.osv.dev/v1/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
+      body: JSON.stringify(osvQuery),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (osvRes.ok) {
+      const osvData = await osvRes.json();
+      vulns = (osvData?.vulns || []).map((v) => ({
+        id: v.id,
+        aliases: v.aliases || [],
+        summary: v.summary || (v.details || "").slice(0, 240),
+        published: v.published,
+        severity: v.database_specific?.severity || v.severity?.[0]?.type || "UNKNOWN",
+      }));
+    }
+  } catch {
+    // Proceed if OSV fails
+  }
+
+  const verdict =
+    vulns.length > 0 ? "VULNERABLE" : deprecated ? "DEPRECATED" : "SAFE";
+
+  return {
+    package: pkgName,
+    ecosystem: osvEcosystem,
+    checked_version: targetVersion || "all",
+    latest_version: latestVersion,
+    verdict,
+    deprecated,
+    metadata: {
+      description,
+      license,
+      repository,
+    },
+    vulnerability_count: vulns.length,
+    vulnerabilities: vulns.slice(0, 10),
+    llm_summary: `Package ${pkgName}@${targetVersion || "latest"} (${osvEcosystem}) -> Verdict: ${verdict} | Latest Version: ${
+      latestVersion || "Unknown"
+    } | Known Vulnerabilities: ${vulns.length}${
+      vulns.length > 0 ? ` (${vulns.map((v) => v.id).join(", ")})` : ""
+    }.`,
+  };
+}
+
+/**
+ * Reconstruct OpenAlex inverted-index abstract into plain text.
+ */
+function reconstructAbstract(invertedIndex) {
+  if (!invertedIndex || typeof invertedIndex !== "object") return null;
+  const words = [];
+  for (const [word, positions] of Object.entries(invertedIndex)) {
+    for (const pos of positions) {
+      words[pos] = word;
+    }
+  }
+  return words.filter(Boolean).join(" ").slice(0, 900);
+}
+
+/**
+ * 8. Deep Academic & Scientific Literature Search (OpenAlex + arXiv).
+ * Returns peer-reviewed papers, citation counts, reconstructed abstracts, and direct Open-Access PDF links.
+ */
+export async function academicSearch({ query, limit = 5 }) {
+  if (!query || typeof query !== "string" || !query.trim()) {
+    throw new Error("Missing required parameter: 'query'");
+  }
+
+  const safeLimit = Math.min(Math.max(Number(limit) || 5, 1), 15);
+  const cleanQuery = query.trim();
+
+  const [openAlexRes, arxivRes] = await Promise.allSettled([
+    fetch(
+      `https://api.openalex.org/works?search=${encodeURIComponent(cleanQuery)}&per-page=${safeLimit}`,
+      { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(8000) }
+    ).then((r) => (r.ok ? r.json() : null)),
+    fetch(
+      `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQuery)}&start=0&max_results=3`,
+      { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(7000) }
+    ).then((r) => (r.ok ? r.text() : null)),
+  ]);
+
+  const papers = [];
+
+  if (openAlexRes.status === "fulfilled" && openAlexRes.value?.results) {
+    for (const w of openAlexRes.value.results) {
+      papers.push({
+        source: "openalex",
+        title: w.title || w.display_name,
+        publication_year: w.publication_year || null,
+        citations_count: w.cited_by_count || 0,
+        authors: (w.authorships || [])
+          .slice(0, 5)
+          .map((a) => a.author?.display_name)
+          .filter(Boolean),
+        doi: w.doi || null,
+        pdf_url: w.open_access?.oa_url || w.primary_location?.pdf_url || w.doi || w.id,
+        abstract: reconstructAbstract(w.abstract_inverted_index),
+      });
+    }
+  }
+
+  if (arxivRes.status === "fulfilled" && arxivRes.value) {
+    const xml = arxivRes.value;
+    const entries = xml.match(/<entry>[\s\S]*?<\/entry>/g) || [];
+    for (const entry of entries) {
+      const title = entry.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.replace(/\s+/g, " ").trim();
+      const summary = entry.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.replace(/\s+/g, " ").trim();
+      const idUrl = entry.match(/<id>([\s\S]*?)<\/id>/)?.[1]?.trim();
+      const published = entry.match(/<published>(\d{4})/)?.[1];
+      if (title && idUrl) {
+        papers.push({
+          source: "arxiv",
+          title,
+          publication_year: published ? Number(published) : null,
+          citations_count: null,
+          authors: (entry.match(/<name>([\s\S]*?)<\/name>/g) || [])
+            .slice(0, 5)
+            .map((n) => n.replace(/<\/?name>/g, "").trim()),
+          doi: null,
+          pdf_url: idUrl.replace("/abs/", "/pdf/"),
+          abstract: (summary || "").slice(0, 900),
+        });
+      }
+    }
+  }
+
+  const finalPapers = papers.slice(0, safeLimit);
+  const markdown = finalPapers
+    .map(
+      (p, i) =>
+        `### ${i + 1}. ${p.title} (${p.publication_year || "N/A"}) [${p.source.toUpperCase()}]\n` +
+        `- **Authors:** ${p.authors.join(", ") || "N/A"} | **Citations:** ${p.citations_count ?? "Preprint"}\n` +
+        `- **PDF / URL:** ${p.pdf_url}\n` +
+        (p.abstract ? `- **Abstract:** ${p.abstract}\n` : "")
+    )
+    .join("\n");
+
+  return {
+    query: cleanQuery,
+    count: finalPapers.length,
+    papers: finalPapers,
+    llm_markdown: markdown || "No academic papers found for this query.",
+  };
 }

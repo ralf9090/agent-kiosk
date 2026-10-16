@@ -4,13 +4,26 @@
  */
 import readline from "node:readline";
 import { MCP_TOOLS } from "./server.js";
-import { socialSearch, mapsLeads, webExtract, securityAudit } from "./providers.js";
+import {
+  socialSearch,
+  mapsLeads,
+  webExtract,
+  securityAudit,
+  tokenAlpha,
+  domainIntel,
+  packageAudit,
+  academicSearch,
+} from "./providers.js";
 
 const HANDLERS = {
   social_search: socialSearch,
   maps_leads: mapsLeads,
   web_extract: webExtract,
   security_audit: securityAudit,
+  token_alpha: tokenAlpha,
+  domain_intel: domainIntel,
+  package_audit: packageAudit,
+  academic_search: academicSearch,
 };
 
 const rl = readline.createInterface({
@@ -36,7 +49,7 @@ rl.on("line", async (line) => {
         result: {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {}, resources: {}, prompts: {} },
-          serverInfo: { name: "agent-kiosk", version: "2.1.0" },
+          serverInfo: { name: "agent-kiosk", version: "2.2.0" },
         },
       });
     }

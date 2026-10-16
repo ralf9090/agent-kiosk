@@ -1,6 +1,6 @@
 /**
  * x402 v2 Payment Protocol Middleware & Verification + Settlement Layer
- * Supports 4 high-demand B2A endpoints on Base Mainnet (eip155:8453).
+ * Supports 8 high-demand B2A endpoints on Base Mainnet (eip155:8453).
  */
 
 export const CONFIG = {
@@ -41,6 +41,34 @@ export const PRICING = {
     amount: "20000", // 0.02 USDC
     description:
       "Pre-flight security scanner for 0x smart contracts/tokens (honeypot, tax, liquidity via GoPlus & DexScreener) and URLs (phishing & prompt injection).",
+    mimeType: "application/json",
+  },
+  "/v1/token-alpha": {
+    priceUsd: "0.02",
+    amount: "20000", // 0.02 USDC
+    description:
+      "Real-time DEX order-flow & token alpha signal analyzer: buy vs. sell pressure, liquidity depth, volume velocity, and top pools.",
+    mimeType: "application/json",
+  },
+  "/v1/domain-intel": {
+    priceUsd: "0.02",
+    amount: "20000", // 0.02 USDC
+    description:
+      "B2B company & domain intelligence: DNS records, MX email provider, SaaS tech stack fingerprints from TXT/NS, RDAP registration, and active subdomains.",
+    mimeType: "application/json",
+  },
+  "/v1/package-audit": {
+    priceUsd: "0.01",
+    amount: "10000", // 0.01 USDC
+    description:
+      "Open-source package & CVE vulnerability scanner for coding agents (npm, PyPI, crates.io) powered by Google OSV.dev.",
+    mimeType: "application/json",
+  },
+  "/v1/academic-search": {
+    priceUsd: "0.02",
+    amount: "20000", // 0.02 USDC
+    description:
+      "Peer-reviewed scientific paper & preprint search (OpenAlex + arXiv) returning citations, reconstructed abstracts, and direct Open-Access PDF links.",
     mimeType: "application/json",
   },
 };

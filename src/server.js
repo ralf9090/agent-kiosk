@@ -1,5 +1,14 @@
 import http from "node:http";
-import { socialSearch, mapsLeads, webExtract, securityAudit } from "./providers.js";
+import {
+  socialSearch,
+  mapsLeads,
+  webExtract,
+  securityAudit,
+  tokenAlpha,
+  domainIntel,
+  packageAudit,
+  academicSearch,
+} from "./providers.js";
 import { CONFIG, PRICING, verifyAndSettlePayment } from "./x402.js";
 
 const PORT = Number(process.env.PORT || 4020);
@@ -96,6 +105,84 @@ export const MCP_TOOLS = [
       required: ["target"],
     },
   },
+  {
+    name: "token_alpha",
+    description:
+      "Real-time crypto & DeFi order-flow intelligence. Analyzes buy vs. sell transaction pressure, liquidity depth, volume velocity, FDV, and top DEX pools for any token ticker or contract address.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Token symbol (e.g., 'AERO', 'PEPE', 'VIRTUAL') or contract address (0x...)",
+        },
+        chain: {
+          type: "string",
+          enum: ["all", "base", "ethereum", "solana", "arbitrum", "bsc"],
+          description: "Optional chain filter (default: 'all')",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "domain_intel",
+    description:
+      "B2B company & domain infrastructure intelligence. Resolves DNS records (A, MX, TXT, NS), identifies email provider (Google Workspace, M365, etc.), detects SaaS tech stack from TXT verification records, queries RDAP registration dates, and discovers active subdomains.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        domain: {
+          type: "string",
+          description: "Target company domain or URL (e.g., 'stripe.com', 'vercel.com')",
+        },
+      },
+      required: ["domain"],
+    },
+  },
+  {
+    name: "package_audit",
+    description:
+      "Open-source package & CVE security scanner for coding agents. Checks npm, PyPI, or Rust crates against Google OSV.dev for known security vulnerabilities, deprecation status, and latest stable version.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Package name (e.g., 'lodash', 'express', 'requests', 'tokio')",
+        },
+        ecosystem: {
+          type: "string",
+          enum: ["npm", "pypi", "crates.io"],
+          description: "Package registry ecosystem (default: 'npm')",
+        },
+        version: {
+          type: "string",
+          description: "Optional specific version to audit (defaults to latest version)",
+        },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "academic_search",
+    description:
+      "Deep scientific & academic research tool. Queries OpenAlex and arXiv for peer-reviewed papers and preprints, returning citation counts, reconstructed abstracts, authors, and direct Open-Access PDF links.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Research topic or scientific query (e.g., 'autonomous AI agents', 'zero knowledge proofs')",
+        },
+        limit: {
+          type: "number",
+          description: "Number of papers to return (1-15, default: 5)",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 const ROUTE_HANDLERS = {
@@ -103,6 +190,10 @@ const ROUTE_HANDLERS = {
   "/v1/maps-leads": mapsLeads,
   "/v1/web-extract": webExtract,
   "/v1/security-audit": securityAudit,
+  "/v1/token-alpha": tokenAlpha,
+  "/v1/domain-intel": domainIntel,
+  "/v1/package-audit": packageAudit,
+  "/v1/academic-search": academicSearch,
 };
 
 const TOOL_TO_ROUTE = {
@@ -110,6 +201,10 @@ const TOOL_TO_ROUTE = {
   maps_leads: "/v1/maps-leads",
   web_extract: "/v1/web-extract",
   security_audit: "/v1/security-audit",
+  token_alpha: "/v1/token-alpha",
+  domain_intel: "/v1/domain-intel",
+  package_audit: "/v1/package-audit",
+  academic_search: "/v1/academic-search",
 };
 
 function readJsonBody(req) {
@@ -185,115 +280,64 @@ export function createAppServer() {
     // 1. Agent Discovery: /llms.txt
     if (req.method === "GET" && pathname === "/llms.txt") {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      return res.end(
-        [
-          "# Agent Kiosk — Instant Pay-Per-Call Data & Security API (x402 v2 & MCP)",
-          "",
-          "> No sign-up, no monthly subscription. Autonomous AI agents can query live social discussions, verified business leads, clean web markdown, and on-chain token/URL security audits using HTTP x402 v2 (Base USDC) or MCP.",
-          "",
-          "## Endpoints",
-          `- POST ${baseUrl}/v1/social-search ($${PRICING["/v1/social-search"].priceUsd} USDC): Live Reddit & HackerNews discussions in clean JSON/Markdown.`,
-          `- POST ${baseUrl}/v1/maps-leads ($${PRICING["/v1/maps-leads"].priceUsd} USDC): Business name, phone, website, address, and coordinates.`,
-          `- POST ${baseUrl}/v1/web-extract ($${PRICING["/v1/web-extract"].priceUsd} USDC): Clean URL-to-Markdown extractor with Prompt Injection detection.`,
-          `- POST ${baseUrl}/v1/security-audit ($${PRICING["/v1/security-audit"].priceUsd} USDC): 0x Token/Contract Honeypot & URL Phishing/Injection scanner.`,
-          `- POST ${baseUrl}/mcp : Model Context Protocol (JSON-RPC 2.0) server endpoint.`,
-          `- GET ${baseUrl}/openapi.json : OpenAPI 3.1 specification.`,
-        ].join("\n")
-      );
+      const lines = [
+        "# Agent Kiosk — 8-in-1 Autonomous B2A Data, Market Alpha & Security Supermarket (x402 v2 & MCP)",
+        "",
+        "> No sign-up, no monthly subscription. Autonomous AI agents can query 8 specialized intelligence tools using HTTP x402 v2 (Base USDC) or Model Context Protocol (MCP).",
+        "",
+        "## Endpoints",
+        ...Object.entries(PRICING).map(
+          ([route, info]) => `- POST ${baseUrl}${route} ($${info.priceUsd} USDC): ${info.description}`
+        ),
+        `- POST ${baseUrl}/mcp : Model Context Protocol (JSON-RPC 2.0) server endpoint (8 tools).`,
+        `- GET ${baseUrl}/openapi.json : OpenAPI 3.1 specification.`,
+      ];
+      return res.end(lines.join("\n"));
     }
 
-    // 2. OpenAPI 3.1 Spec with full input & output schemas (zero warnings on x402scan)
+    // 2. OpenAPI 3.1 Spec with full input & output schemas for all 8 endpoints
     if (req.method === "GET" && pathname === "/openapi.json") {
+      const openApiPaths = {};
+      for (const tool of MCP_TOOLS) {
+        const route = TOOL_TO_ROUTE[tool.name];
+        const priceInfo = PRICING[route];
+        openApiPaths[route] = {
+          post: {
+            operationId: tool.name,
+            summary: priceInfo.description,
+            "x-payment-info": {
+              protocols: [{ x402: {} }],
+              price: { mode: "fixed", currency: "USD", amount: priceInfo.priceUsd },
+            },
+            requestBody: {
+              required: true,
+              content: { "application/json": { schema: tool.inputSchema } },
+            },
+            responses: {
+              200: STANDARD_200_RESPONSE,
+              402: { description: `x402 v2 Payment Required ($${priceInfo.priceUsd} USDC on Base)` },
+            },
+          },
+        };
+      }
+
       return sendJson(res, 200, {
         openapi: "3.1.0",
         info: {
           title: "Agent Kiosk B2A API",
-          version: "2.1.0",
+          version: "2.2.0",
           description:
-            "Instant Pay-Per-Call Social Search, Local Business Leads, Clean Web Extraction, and On-Chain/URL Security Audits for AI Agents via x402 v2 (Base USDC) and MCP.",
+            "8-in-1 Pay-Per-Call Intelligence Supermarket for AI Agents: Social Search, Business Leads, Clean Web Extraction, Smart Contract Security, DeFi Order-Flow Alpha, Domain Intelligence, Package CVE Audits, and Academic Research via x402 v2 (Base USDC) and MCP.",
           contact: {
             name: "Agent Kiosk Support",
             email: "ralf9090@users.noreply.github.com",
             url: "https://github.com/ralf9090/agent-kiosk",
           },
           "x-guidance":
-            "Call POST /v1/social-search, /v1/maps-leads, /v1/web-extract, or /v1/security-audit. Unauthenticated requests return an HTTP 402 challenge with PAYMENT-REQUIRED header on Base (eip155:8453).",
+            "Call any /v1/* endpoint via POST with JSON body. Unauthenticated requests return an HTTP 402 challenge with PAYMENT-REQUIRED header on Base (eip155:8453).",
         },
         servers: [{ url: baseUrl }],
-        paths: {
-          "/v1/social-search": {
-            post: {
-              operationId: "socialSearch",
-              summary: PRICING["/v1/social-search"].description,
-              "x-payment-info": {
-                protocols: [{ x402: {} }],
-                price: { mode: "fixed", currency: "USD", amount: PRICING["/v1/social-search"].priceUsd },
-              },
-              requestBody: {
-                required: true,
-                content: { "application/json": { schema: MCP_TOOLS[0].inputSchema } },
-              },
-              responses: {
-                200: STANDARD_200_RESPONSE,
-                402: { description: "x402 v2 Payment Required ($0.02 USDC on Base)" },
-              },
-            },
-          },
-          "/v1/maps-leads": {
-            post: {
-              operationId: "mapsLeads",
-              summary: PRICING["/v1/maps-leads"].description,
-              "x-payment-info": {
-                protocols: [{ x402: {} }],
-                price: { mode: "fixed", currency: "USD", amount: PRICING["/v1/maps-leads"].priceUsd },
-              },
-              requestBody: {
-                required: true,
-                content: { "application/json": { schema: MCP_TOOLS[1].inputSchema } },
-              },
-              responses: {
-                200: STANDARD_200_RESPONSE,
-                402: { description: "x402 v2 Payment Required ($0.03 USDC on Base)" },
-              },
-            },
-          },
-          "/v1/web-extract": {
-            post: {
-              operationId: "webExtract",
-              summary: PRICING["/v1/web-extract"].description,
-              "x-payment-info": {
-                protocols: [{ x402: {} }],
-                price: { mode: "fixed", currency: "USD", amount: PRICING["/v1/web-extract"].priceUsd },
-              },
-              requestBody: {
-                required: true,
-                content: { "application/json": { schema: MCP_TOOLS[2].inputSchema } },
-              },
-              responses: {
-                200: STANDARD_200_RESPONSE,
-                402: { description: "x402 v2 Payment Required ($0.01 USDC on Base)" },
-              },
-            },
-          },
-          "/v1/security-audit": {
-            post: {
-              operationId: "securityAudit",
-              summary: PRICING["/v1/security-audit"].description,
-              "x-payment-info": {
-                protocols: [{ x402: {} }],
-                price: { mode: "fixed", currency: "USD", amount: PRICING["/v1/security-audit"].priceUsd },
-              },
-              requestBody: {
-                required: true,
-                content: { "application/json": { schema: MCP_TOOLS[3].inputSchema } },
-              },
-              responses: {
-                200: STANDARD_200_RESPONSE,
-                402: { description: "x402 v2 Payment Required ($0.02 USDC on Base)" },
-              },
-            },
-          },
-        },
+        paths: openApiPaths,
       });
     }
 
@@ -307,10 +351,10 @@ export function createAppServer() {
     ) {
       return sendJson(res, 200, {
         name: "Agent Kiosk",
-        version: "2.1.0",
+        version: "2.2.0",
         x402Version: 2,
         description:
-          "Autonomous B2A Data & Security Vending Machine: Social Search, Business Leads, Web Markdown Extractor, and Smart Contract/URL Security Radar via x402 v2 and MCP.",
+          "8-in-1 Autonomous B2A Data, Market Alpha & Security Supermarket via x402 v2 (Base USDC) and MCP.",
         protocols: ["x402", "mcp", "rest"],
         payment: {
           network: CONFIG.network,
@@ -326,7 +370,7 @@ export function createAppServer() {
       });
     }
 
-    // 4. Paid x402 v2 Endpoints (all 4 routes)
+    // 4. Paid x402 v2 Endpoints (all 8 routes)
     if ((req.method === "POST" || req.method === "GET") && ROUTE_HANDLERS[pathname]) {
       const resourceUrl = `${baseUrl}${pathname}`;
       const auth = await verifyAndSettlePayment(req, pathname, resourceUrl);
@@ -381,7 +425,7 @@ export function createAppServer() {
             result: {
               protocolVersion: "2024-11-05",
               capabilities: { tools: {}, resources: {}, prompts: {} },
-              serverInfo: { name: "agent-kiosk", version: "2.1.0" },
+              serverInfo: { name: "agent-kiosk", version: "2.2.0" },
             },
           });
         }
