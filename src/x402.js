@@ -1,10 +1,6 @@
 /**
  * x402 v2 Payment Protocol Middleware & Verification + Settlement Layer
- * Implements the HTTP 402 Payment Required v2 specification:
- * 1. Challenge generation (x402Version: 2 + CAIP-2 network "eip155:8453" + PAYMENT-REQUIRED base64 header)
- * 2. Cryptographic signature verification (/verify) supporting both PAYMENT-SIGNATURE (v2) and X-PAYMENT (v1)
- * 3. On-chain settlement (/settle) returning PAYMENT-RESPONSE header
- * 4. Optional API_SECRET_KEY header for prepaid / Apify / Smithery B2B integrations
+ * Supports 4 high-demand B2A endpoints on Base Mainnet (eip155:8453).
  */
 
 export const CONFIG = {
@@ -21,16 +17,30 @@ export const CONFIG = {
 export const PRICING = {
   "/v1/social-search": {
     priceUsd: "0.02",
-    amount: "20000", // 0.02 USDC (6 decimals)
+    amount: "20000", // 0.02 USDC
     description:
       "Real-time social media search (Reddit, HackerNews) returning clean JSON & Markdown for AI agents.",
     mimeType: "application/json",
   },
   "/v1/maps-leads": {
     priceUsd: "0.03",
-    amount: "30000", // 0.03 USDC (6 decimals)
+    amount: "30000", // 0.03 USDC
     description:
       "Local business lead extractor returning company name, phone, website, address, and coordinates.",
+    mimeType: "application/json",
+  },
+  "/v1/web-extract": {
+    priceUsd: "0.01",
+    amount: "10000", // 0.01 USDC
+    description:
+      "Clean webpage-to-Markdown extractor with automatic Prompt Injection trap scanning for AI agents.",
+    mimeType: "application/json",
+  },
+  "/v1/security-audit": {
+    priceUsd: "0.02",
+    amount: "20000", // 0.02 USDC
+    description:
+      "Pre-flight security scanner for 0x smart contracts/tokens (honeypot, tax, liquidity via GoPlus & DexScreener) and URLs (phishing & prompt injection).",
     mimeType: "application/json",
   },
 };

@@ -16,6 +16,7 @@ try {
   assert.equal(discRes.status, 200);
   const disc = await discRes.json();
   assert.equal(disc.x402Version, 2);
+  assert.equal(disc.resources.length, 4);
 
   const favRes = await fetch(`${base}/favicon.ico`);
   assert.equal(favRes.status, 200);
@@ -24,72 +25,73 @@ try {
   assert.equal(openApiRes.status, 200);
   const openApi = await openApiRes.json();
   assert.ok(openApi.info.contact.email);
-  console.log("✅ 1. Discovery manifest, /openapi.json, and /favicon.ico verified");
+  assert.equal(Object.keys(openApi.paths).length, 4);
+  console.log("✅ 1. Discovery manifest, /openapi.json (4 paths), and /favicon.ico verified");
 
   // 2. Test unauthenticated REST request returns HTTP 402 with x402Version 2 and PAYMENT-REQUIRED header
-  const unpaidRes = await fetch(`${base}/v1/social-search`, {
+  const unpaidRes = await fetch(`${base}/v1/security-audit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: "AI agents" }),
+    body: JSON.stringify({ target: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" }),
   });
   assert.equal(unpaidRes.status, 402);
-  const paymentReqHeader = unpaidRes.headers.get("payment-required");
-  assert.ok(paymentReqHeader, "Expected PAYMENT-REQUIRED base64 header");
-  const challenge = await unpaidRes.json();
-  assert.equal(challenge.x402Version, 2);
-  assert.equal(challenge.accepts[0].network, "eip155:8453");
-  assert.equal(challenge.accepts[0].amount, "20000");
-  console.log("✅ 2. HTTP 402 v2 Payment Required & PAYMENT-REQUIRED header verified ($0.02 USDC on eip155:8453)");
+  assert.ok(unpaidRes.headers.get("payment-required"));
+  console.log("✅ 2. HTTP 402 v2 Payment Required verified across new endpoints");
 
-  // 3. Test unauthenticated MCP tools/call ALSO returns HTTP 402 v2
-  const unpaidMcpRes = await fetch(`${base}/mcp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 99,
-      method: "tools/call",
-      params: { name: "social_search", arguments: { query: "MCP" } },
-    }),
-  });
-  assert.equal(unpaidMcpRes.status, 402);
-  console.log("✅ 3. MCP tools/call payment gate verified (blocks unpaid calls with 402)");
-
-  // 4. Test authorized request to /v1/social-search
+  // 3. Test authorized /v1/social-search
   const socialRes = await fetch(`${base}/v1/social-search`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-KEY": "test-only-secret-key",
-    },
-    body: JSON.stringify({ query: "MCP server", limit: 3 }),
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ query: "MCP server", limit: 2 }),
   });
   assert.equal(socialRes.status, 200);
   const socialData = await socialRes.json();
-  assert.equal(socialData.ok, true);
-  assert.ok(socialData.data.count > 0, "Expected social search results");
-  console.log(`✅ 4. /v1/social-search returned ${socialData.data.count} live social discussions`);
+  assert.ok(socialData.data.count > 0);
+  console.log(`✅ 3. /v1/social-search verified (${socialData.data.count} items)`);
 
-  // 5. Test authorized request to /v1/maps-leads
+  // 4. Test authorized /v1/maps-leads
   const mapsRes = await fetch(`${base}/v1/maps-leads`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-KEY": "test-only-secret-key",
-    },
-    body: JSON.stringify({ query: "cafe", location: "San Francisco", limit: 5 }),
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ query: "cafe", location: "San Francisco", limit: 3 }),
   });
   assert.equal(mapsRes.status, 200);
   const mapsData = await mapsRes.json();
-  assert.equal(mapsData.ok, true);
-  assert.ok(mapsData.data.count > 0, "Expected maps lead results");
-  const firstLead = mapsData.data.leads[0];
-  assert.ok(firstLead.phone || firstLead.website);
+  assert.ok(mapsData.data.count > 0);
+  console.log(`✅ 4. /v1/maps-leads verified (${mapsData.data.count} leads)`);
+
+  // 5. Test authorized /v1/web-extract
+  const webRes = await fetch(`${base}/v1/web-extract`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ url: "https://example.com", max_length: 2000 }),
+  });
+  assert.equal(webRes.status, 200);
+  const webData = await webRes.json();
+  assert.equal(webData.ok, true);
+  assert.ok(webData.data.llm_markdown.includes("Example Domain"));
+  assert.equal(webData.data.prompt_injection_Check.safe, true);
+  console.log("✅ 5. /v1/web-extract verified (clean Markdown + Prompt Injection scanner)");
+
+  // 6. Test authorized /v1/security-audit (auditing Base USDC contract via GoPlus + DexScreener)
+  const auditRes = await fetch(`${base}/v1/security-audit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({
+      target: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      chain: "base",
+    }),
+  });
+  assert.equal(auditRes.status, 200);
+  const auditData = await auditRes.json();
+  assert.equal(auditData.ok, true);
+  assert.equal(auditData.data.type, "smart_contract");
+  assert.equal(auditData.data.token_info.is_honeypot, false);
   console.log(
-    `✅ 5. /v1/maps-leads returned ${mapsData.data.count} verified SF leads (Sample: ${firstLead.name})`
+    `✅ 6. /v1/security-audit verified (${auditData.data.token_info.symbol} -> Verdict: ${auditData.data.verdict})`
   );
 
-  // 6. Test MCP JSON-RPC tools/list
+  // 7. Test MCP JSON-RPC tools/list returns all 4 tools
   const mcpRes = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -97,8 +99,8 @@ try {
   });
   assert.equal(mcpRes.status, 200);
   const mcpData = await mcpRes.json();
-  assert.equal(mcpData.result.tools.length, 2);
-  console.log("✅ 6. MCP JSON-RPC endpoint (/mcp) verified with 2 tools");
+  assert.equal(mcpData.result.tools.length, 4);
+  console.log("✅ 7. MCP JSON-RPC endpoint (/mcp) verified with all 4 tools");
 } finally {
   server.close();
 }

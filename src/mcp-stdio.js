@@ -4,7 +4,14 @@
  */
 import readline from "node:readline";
 import { MCP_TOOLS } from "./server.js";
-import { socialSearch, mapsLeads } from "./providers.js";
+import { socialSearch, mapsLeads, webExtract, securityAudit } from "./providers.js";
+
+const HANDLERS = {
+  social_search: socialSearch,
+  maps_leads: mapsLeads,
+  web_extract: webExtract,
+  security_audit: securityAudit,
+};
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -28,8 +35,8 @@ rl.on("line", async (line) => {
         id,
         result: {
           protocolVersion: "2024-11-05",
-          capabilities: { tools: {} },
-          serverInfo: { name: "agent-kiosk", version: "1.0.0" },
+          capabilities: { tools: {}, resources: {}, prompts: {} },
+          serverInfo: { name: "agent-kiosk", version: "2.1.0" },
         },
       });
     }
@@ -46,14 +53,35 @@ rl.on("line", async (line) => {
       });
     }
 
+    if (method === "resources/list") {
+      return sendRpc({
+        jsonrpc: "2.0",
+        id,
+        result: { resources: [] },
+      });
+    }
+
+    if (method === "prompts/list") {
+      return sendRpc({
+        jsonrpc: "2.0",
+        id,
+        result: { prompts: [] },
+      });
+    }
+
     if (method === "tools/call") {
       const toolName = params?.name;
       const args = params?.arguments || {};
-      const output =
-        toolName === "social_search"
-          ? await socialSearch(args)
-          : await mapsLeads(args);
+      const fn = HANDLERS[toolName];
+      if (!fn) {
+        return sendRpc({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32601, message: `Unknown tool: ${toolName}` },
+        });
+      }
 
+      const output = await fn(args);
       return sendRpc({
         jsonrpc: "2.0",
         id,
