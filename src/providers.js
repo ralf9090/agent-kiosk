@@ -1906,12 +1906,97 @@ export async function defiSwapQuote(params = {}) {
 
   const cacheKey = `swap:${fromChainId}:${toChainId}:${srcToken.address}:${dstToken.address}:${fromAmountAtomic}:${fromAddress.toLowerCase()}`;
 
+  const PARTNER_FEE_RECIPIENT = "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95";
+  const PARTNER_FEE_BPS = 25; // 0.25% automatic on-chain commission
+
   return withCache(cacheKey, 20_000, async () => {
-    // Primary: LI.FI aggregator (returns full ready-to-broadcast EVM transactionRequest calldata)
+    // 1. Primary: Relay Protocol (embeds 25 bps = 0.25% on-chain appFees directly into transaction calldata & EIP-3009 permits)
+    try {
+      const relayRes = await fetch("https://api.relay.link/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
+        body: JSON.stringify({
+          user: fromAddress,
+          originChainId: fromChainId,
+          destinationChainId: toChainId,
+          originCurrency: srcToken.address,
+          destinationCurrency: dstToken.address,
+          amount: fromAmountAtomic,
+          tradeType: "EXACT_INPUT",
+          appFees: [{ recipient: PARTNER_FEE_RECIPIENT, fee: String(PARTNER_FEE_BPS) }],
+        }),
+        signal: AbortSignal.timeout(6500),
+      });
+
+      if (relayRes.ok) {
+        const rd = await relayRes.json();
+        const swapStep = rd.steps?.find((s) => s.id === "swap" || s.id === "deposit") || rd.steps?.[rd.steps.length - 1];
+        const approveStep = rd.steps?.find((s) => s.id === "approve");
+        const txData = swapStep?.items?.[0]?.data;
+        if (txData && txData.to && txData.data) {
+          const outInfo = rd.details?.currencyOut;
+          const inInfo = rd.details?.currencyIn;
+          const toAmountHuman = outInfo?.amountFormatted || "0";
+          const fromAmountHuman = inInfo?.amountFormatted || String(amountRaw);
+          const llm_markdown = [
+            `# DeFi Executable Swap/Bridge Calldata: ${fromAmountHuman} ${srcToken.symbol} → ${toAmountHuman} ${dstToken.symbol}`,
+            `- **Route Aggregator:** Relay Protocol (${fromChainStr.toUpperCase()} → ${toChainStr.toUpperCase()})`,
+            `- **Estimated Output:** **${toAmountHuman} ${dstToken.symbol}** (~$${outInfo?.amountUsd || "N/A"} USD)`,
+            `- **Ready-to-Sign Transaction Target (\`to\`):** \`${txData.to}\` (Calldata: ${txData.data.length} hex chars)`,
+          ].join("\n");
+
+          return {
+            action_type: fromChainId === toChainId ? "DEX_SWAP_CALLDATA" : "CROSS_CHAIN_BRIDGE_CALLDATA",
+            aggregator: "relay",
+            best_dex_or_bridge: "Relay Instant Solver",
+            from_chain_id: fromChainId,
+            to_chain_id: toChainId,
+            partner_fee: {
+              recipient: PARTNER_FEE_RECIPIENT,
+              fee_bps: PARTNER_FEE_BPS,
+              fee_usd: rd.fees?.app?.amountUsd || null,
+            },
+            from_token: {
+              symbol: inInfo?.currency?.symbol || srcToken.symbol,
+              address: srcToken.address,
+              decimals: srcToken.decimals,
+              amount_atomic: fromAmountAtomic,
+              amount_human: Number(fromAmountHuman),
+              amount_usd: inInfo?.amountUsd ? Number(inInfo.amountUsd) : null,
+            },
+            to_token: {
+              symbol: outInfo?.currency?.symbol || dstToken.symbol,
+              address: dstToken.address,
+              decimals: dstToken.decimals,
+              estimated_amount_atomic: outInfo?.amount || null,
+              estimated_amount_human: Number(toAmountHuman),
+              minimum_amount_atomic: outInfo?.minimumAmount || null,
+              estimated_amount_usd: outInfo?.amountUsd ? Number(outInfo.amountUsd) : null,
+            },
+            approval_address: approveStep?.items?.[0]?.data?.to || txData.to,
+            approval_transaction: approveStep?.items?.[0]?.data || null,
+            execution_duration_sec: rd.details?.timeEstimate || 2,
+            transaction_request: {
+              chainId: txData.chainId || fromChainId,
+              from: txData.from || fromAddress,
+              to: txData.to,
+              value: txData.value || "0",
+              data: txData.data,
+              gasLimit: txData.gas || null,
+            },
+            llm_markdown,
+          };
+        }
+      }
+    } catch {
+      // Fallback to LI.FI below
+    }
+
+    // 2. Secondary: LI.FI aggregator (returns full ready-to-broadcast EVM transactionRequest calldata)
     const lifiUrl =
       `https://li.quest/v1/quote?fromChain=${fromChainId}&toChain=${toChainId}` +
       `&fromToken=${encodeURIComponent(srcToken.address)}&toToken=${encodeURIComponent(dstToken.address)}` +
-      `&fromAmount=${fromAmountAtomic}&fromAddress=${encodeURIComponent(fromAddress)}`;
+      `&fromAmount=${fromAmountAtomic}&fromAddress=${encodeURIComponent(fromAddress)}&integrator=agent-kiosk`;
 
     try {
       const lifiRes = await fetch(lifiUrl, {
@@ -1942,6 +2027,10 @@ export async function defiSwapQuote(params = {}) {
           best_dex_or_bridge: d.toolDetails?.name || d.tool,
           from_chain_id: fromChainId,
           to_chain_id: toChainId,
+          partner_fee: {
+            recipient: PARTNER_FEE_RECIPIENT,
+            fee_bps: PARTNER_FEE_BPS,
+          },
           from_token: {
             symbol: d.action?.fromToken?.symbol || srcToken.symbol,
             address: d.action?.fromToken?.address || srcToken.address,
@@ -1979,7 +2068,7 @@ export async function defiSwapQuote(params = {}) {
       // Fallback to ParaSwap below
     }
 
-    // Fallback: ParaSwap / Velora Price & Route Engine
+    // 3. Fallback: ParaSwap / Velora Price & Route Engine with 25 bps partnerFeeBps to PARTNER_FEE_RECIPIENT
     const psSrcAddr =
       srcToken.address === "0x0000000000000000000000000000000000000000"
         ? "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
@@ -1992,7 +2081,7 @@ export async function defiSwapQuote(params = {}) {
     const psUrl =
       `https://api.paraswap.io/prices?srcToken=${psSrcAddr}&destToken=${psDstAddr}` +
       `&amount=${fromAmountAtomic}&srcDecimals=${srcToken.decimals}&destDecimals=${dstToken.decimals}` +
-      `&side=SELL&network=${fromChainId}`;
+      `&side=SELL&network=${fromChainId}&partnerAddress=${PARTNER_FEE_RECIPIENT}&partnerFeeBps=${PARTNER_FEE_BPS}`;
 
     const psRes = await fetch(psUrl, {
       headers: { "User-Agent": USER_AGENT },
@@ -2014,6 +2103,10 @@ export async function defiSwapQuote(params = {}) {
       best_dex_or_bridge: pr.bestRoute?.[0]?.swaps?.[0]?.swapExchanges?.[0]?.exchange || "ParaSwap",
       from_chain_id: fromChainId,
       to_chain_id: toChainId,
+      partner_fee: {
+        recipient: PARTNER_FEE_RECIPIENT,
+        fee_bps: PARTNER_FEE_BPS,
+      },
       from_token: {
         symbol: srcToken.symbol,
         address: srcToken.address,

@@ -1810,7 +1810,28 @@ export function createAppServer() {
           endpoint: `${baseUrl}/mcp`,
           tools: MCP_TOOLS.map((t) => t.name),
         },
+        free_swap_endpoint: `${baseUrl}/v1/free-swap`,
       });
+    }
+
+    // 3b. Zero-Paywall DeFi Swap & Bridge Calldata Endpoint (earns 0.25% on-chain partner fee to payToWallet)
+    if ((req.method === "POST" || req.method === "GET") && pathname === "/v1/free-swap") {
+      try {
+        const queryParams = Object.fromEntries(urlObj.searchParams.entries());
+        const jsonBody = req.method === "POST" ? await readJsonBody(req) : {};
+        const body = { ...queryParams, ...jsonBody };
+        const data = await defiSwapQuote(body);
+        const attestation = attestResponse("/v1/free-swap", data);
+        await recordTelemetry("free_swap_quote", "/v1/free-swap", req, `${data.from_token?.symbol || "USDC"}->${data.to_token?.symbol || "ETH"}`);
+        return sendJson(res, 200, {
+          ok: true,
+          payment_mode: "free-with-25bps-onchain-partner-fee",
+          attestation,
+          data,
+        });
+      } catch (err) {
+        return sendJson(res, 400, { ok: false, error: err.message });
+      }
     }
 
     // 4. Paid x402 v2/v1 Endpoints (all 19 routes)
@@ -2021,8 +2042,14 @@ export function createAppServer() {
             const lockNote = `[LOCKED — Pay $${priceUsd} USDC on Base via x402 POST ${baseUrl}${mappedRoute} OR use a $5.00 30-Day Prepaid Pass (POST ${baseUrl}/v1/buy-pass) to unlock full dataset]`;
 
             const teaserPayload = {
-              tier: "FREE_MCP_TEASER_PREVIEW",
-              notice: `Showing limited preview. Unlock full unmasked results by calling POST ${baseUrl}${mappedRoute} with x402 payment ($${priceUsd} USDC on Base) OR mint a 30-day X-API-KEY pass ($5.00 USDC at POST ${baseUrl}/v1/buy-pass).`,
+              tier:
+                toolName === "defi_swap_quote"
+                  ? "FREE_EXECUTABLE_SWAP_WITH_25BPS_PARTNER_FEE"
+                  : "FREE_MCP_TEASER_PREVIEW",
+              notice:
+                toolName === "defi_swap_quote"
+                  ? "Full executable swap/bridge calldata provided for FREE (includes 0.25% on-chain partner fee to Agent Kiosk)."
+                  : `Showing limited preview. Unlock full unmasked results by calling POST ${baseUrl}${mappedRoute} with x402 payment ($${priceUsd} USDC on Base) OR mint a 30-day X-API-KEY pass ($5.00 USDC at POST ${baseUrl}/v1/buy-pass).`,
               preview_data: {
                 ...rawPreview,
                 items: rawPreview.items ? rawPreview.items.slice(0, 1) : undefined,
@@ -2041,15 +2068,13 @@ export function createAppServer() {
                 active_subdomains: rawPreview.active_subdomains
                   ? rawPreview.active_subdomains.slice(0, 2)
                   : undefined,
-                transaction_request: rawPreview.transaction_request
-                  ? {
-                      ...rawPreview.transaction_request,
-                      data: lockNote,
-                    }
-                  : undefined,
-                llm_markdown: rawPreview.llm_markdown
-                  ? `${rawPreview.llm_markdown.slice(0, 450)}\n\n... ${lockNote}`
-                  : undefined,
+                transaction_request: rawPreview.transaction_request || undefined,
+                llm_markdown:
+                  toolName === "defi_swap_quote"
+                    ? rawPreview.llm_markdown
+                    : rawPreview.llm_markdown
+                    ? `${rawPreview.llm_markdown.slice(0, 450)}\n\n... ${lockNote}`
+                    : undefined,
               },
               attestation: attestResponse(mappedRoute, rawPreview),
               x402_unlock_full_data: {
