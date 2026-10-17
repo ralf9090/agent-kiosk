@@ -1,7 +1,8 @@
 {
   "name": "agent-kiosk",
-  "version": "1.0.0",
-  "description": "B2A Data Vending Machine: Live Social Search & Business Leads via x402 Micropayments and MCP",
+  "version": "2.3.1",
+  "description": "12-in-1 B2A Intelligence Supermarket: DeFi Alpha, Whale Wallet Profiler, Smart Contract Security, Prediction Markets, DeFi Yields, B2B Leads & Research via x402 (Base USDC) and MCP",
+  "license": "MIT",
   "type": "module",
   "main": "src/server.js",
   "bin": {
@@ -17,7 +18,11 @@
     "mcp",
     "ai-agents",
     "b2a",
-    "social-search",
-    "maps-leads"
+    "defi-alpha",
+    "wallet-profiler",
+    "prediction-markets",
+    "security-audit",
+    "maps-leads",
+    "social-search"
   ]
 }

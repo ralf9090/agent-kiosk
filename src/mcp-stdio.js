@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Standard MCP stdio server for local/registry integration (Smithery, Cursor, Claude Desktop)
+ * Standard MCP stdio server for local/registry integration (Glama, Smithery, Cursor, Claude Desktop)
  */
 import readline from "node:readline";
 import { MCP_TOOLS } from "./server.js";
+import { CONFIG, PRICING, build402Challenge } from "./x402.js";
 import {
   socialSearch,
   mapsLeads,
@@ -34,6 +35,23 @@ const HANDLERS = {
   github_intel: githubIntel,
 };
 
+const TOOL_TO_ROUTE = {
+  social_search: "/v1/social-search",
+  maps_leads: "/v1/maps-leads",
+  web_extract: "/v1/web-extract",
+  security_audit: "/v1/security-audit",
+  token_alpha: "/v1/token-alpha",
+  domain_intel: "/v1/domain-intel",
+  package_audit: "/v1/package-audit",
+  academic_search: "/v1/academic-search",
+  wallet_profiler: "/v1/wallet-profiler",
+  prediction_markets: "/v1/prediction-markets",
+  defi_yields: "/v1/defi-yields",
+  github_intel: "/v1/github-intel",
+};
+
+const BASE_URL = process.env.PUBLIC_BASE_URL || "https://agent-kiosk.vercel.app";
+
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
@@ -51,18 +69,32 @@ rl.on("line", async (line) => {
     const { id, method, params } = rpc;
 
     if (method === "initialize") {
+      const requestedVersion = params?.protocolVersion;
+      const supportedVersions = ["2024-11-05", "2025-03-26", "2025-06-18"];
+      const negotiatedVersion = supportedVersions.includes(requestedVersion)
+        ? requestedVersion
+        : "2024-11-05";
+
       return sendRpc({
         jsonrpc: "2.0",
         id,
         result: {
-          protocolVersion: "2024-11-05",
+          protocolVersion: negotiatedVersion,
           capabilities: { tools: {}, resources: {}, prompts: {} },
-          serverInfo: { name: "agent-kiosk", version: "2.2.0" },
+          serverInfo: { name: "agent-kiosk", version: "2.3.1" },
         },
       });
     }
 
-    if (method === "notifications/initialized") {
+    if (method === "ping" || method === "logging/setLevel") {
+      return sendRpc({
+        jsonrpc: "2.0",
+        id,
+        result: {},
+      });
+    }
+
+    if (method && method.startsWith("notifications/")) {
       return;
     }
 
@@ -82,6 +114,14 @@ rl.on("line", async (line) => {
       });
     }
 
+    if (method === "resources/templates/list") {
+      return sendRpc({
+        jsonrpc: "2.0",
+        id,
+        result: { resourceTemplates: [] },
+      });
+    }
+
     if (method === "prompts/list") {
       return sendRpc({
         jsonrpc: "2.0",
@@ -94,7 +134,9 @@ rl.on("line", async (line) => {
       const toolName = params?.name;
       const args = params?.arguments || {};
       const fn = HANDLERS[toolName];
-      if (!fn) {
+      const mappedRoute = TOOL_TO_ROUTE[toolName];
+
+      if (!fn || !mappedRoute) {
         return sendRpc({
           jsonrpc: "2.0",
           id,
@@ -102,13 +144,63 @@ rl.on("line", async (line) => {
         });
       }
 
-      const output = await fn(args);
+      const teaserArgs = { ...args, limit: 2, max_length: 600 };
+      const rawPreview = await fn(teaserArgs);
+      const priceUsd = PRICING[mappedRoute]?.priceUsd || "0.02";
+      const endpointUrl = `${BASE_URL}${mappedRoute}`;
+      const lockNote = `[LOCKED — Pay $${priceUsd} USDC on Base via x402 POST ${endpointUrl} to unlock full dataset]`;
+      const { body: challenge } = build402Challenge(mappedRoute, endpointUrl);
+
+      const teaserPayload = {
+        tier: "FREE_MCP_TEASER_PREVIEW",
+        notice: `Showing limited preview. Unlock full unmasked results (up to 25 items, phone numbers, full markdown & alpha signals) by calling POST ${endpointUrl} with x402 v2 payment ($${priceUsd} USDC on Base).`,
+        preview_data: {
+          ...rawPreview,
+          items: rawPreview.items ? rawPreview.items.slice(0, 1) : undefined,
+          leads: rawPreview.leads
+            ? rawPreview.leads.slice(0, 1).map((l) => ({
+                ...l,
+                phone: l.phone ? lockNote : null,
+                email: l.email ? lockNote : null,
+              }))
+            : undefined,
+          top_pools: rawPreview.top_pools ? rawPreview.top_pools.slice(0, 1) : undefined,
+          pools: rawPreview.pools ? rawPreview.pools.slice(0, 1) : undefined,
+          papers: rawPreview.papers ? rawPreview.papers.slice(0, 1) : undefined,
+          markets: rawPreview.markets ? rawPreview.markets.slice(0, 1) : undefined,
+          repositories: rawPreview.repositories ? rawPreview.repositories.slice(0, 1) : undefined,
+          active_subdomains: rawPreview.active_subdomains
+            ? rawPreview.active_subdomains.slice(0, 2)
+            : undefined,
+          llm_markdown: rawPreview.llm_markdown
+            ? `${rawPreview.llm_markdown.slice(0, 450)}\n\n... ${lockNote}`
+            : undefined,
+        },
+        x402_unlock_full_data: {
+          endpoint: endpointUrl,
+          method: "POST",
+          price_usdc: priceUsd,
+          network: CONFIG.network,
+          usdc_contract: CONFIG.usdcAsset,
+          pay_to_wallet: CONFIG.payToWallet,
+          payment_required_challenge: challenge,
+        },
+      };
+
       return sendRpc({
         jsonrpc: "2.0",
         id,
         result: {
-          content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+          content: [{ type: "text", text: JSON.stringify(teaserPayload, null, 2) }],
         },
+      });
+    }
+
+    if (id !== undefined) {
+      return sendRpc({
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32601, message: `Unsupported method: ${method}` },
       });
     }
   } catch (err) {

@@ -17,10 +17,12 @@ const USER_AGENT = "AgentKiosk/2.2 (+https://agent-kiosk.vercel.app)";
 /**
  * 1. Fetch live social media discussions (Reddit + HN) and return LLM-ready structured JSON.
  */
-export async function socialSearch({ query, platform = "all", limit = 10 }) {
-  if (!query || typeof query !== "string" || !query.trim()) {
-    throw new Error("Missing required parameter: 'query'");
-  }
+export async function socialSearch(params = {}) {
+  const rawQuery =
+    params.query || params.q || params.topic || params.keyword || params.search || "AI agents";
+  const query = String(rawQuery).trim() || "AI agents";
+  const platform = params.platform || "all";
+  const limit = params.limit ?? 10;
   const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 25);
   const results = [];
   const tasks = [];
@@ -150,10 +152,11 @@ async function geocodeLocation(location) {
  * 2. Fetch local business leads strictly inside the target city/location,
  * enriched with real phone numbers, websites, emails, and opening hours via Photon + Nominatim.
  */
-export async function mapsLeads({ query, location = "", limit = 10 }) {
-  if (!query || typeof query !== "string" || !query.trim()) {
-    throw new Error("Missing required parameter: 'query'");
-  }
+export async function mapsLeads(params = {}) {
+  const rawQuery = params.query || params.q || params.category || params.business || "cafe";
+  const query = String(rawQuery).trim() || "cafe";
+  const location = String(params.location || params.city || params.region || "San Francisco");
+  const limit = params.limit ?? 10;
   const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 25);
 
   let geo = null;
@@ -351,12 +354,15 @@ function htmlToCleanMarkdown(html, url) {
 /**
  * 3. Extract clean LLM-ready Markdown from any URL with built-in Prompt Injection safety check.
  */
-export async function webExtract({ url, max_length = 8000 }) {
-  if (!url || typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) {
-    throw new Error("Missing or invalid parameter: 'url' (must start with http:// or https://)");
+export async function webExtract(params = {}) {
+  let rawUrl = String(params.url || params.target || params.link || params.query || "https://example.com").trim();
+  if (!rawUrl) rawUrl = "https://example.com";
+  if (!/^https?:\/\//i.test(rawUrl)) {
+    rawUrl = `https://${rawUrl}`;
   }
 
-  const targetUrl = url.trim();
+  const targetUrl = rawUrl;
+  const max_length = params.max_length ?? 8000;
   const maxChars = Math.min(Math.max(Number(max_length) || 8000, 500), 25000);
 
   let title = targetUrl;
@@ -434,12 +440,21 @@ const CHAIN_IDS = {
  * 4. Security & Risk Auditor for Smart Contracts / Tokens (0x...) and Web URLs.
  * Uses GoPlus Security API + DexScreener for live on-chain honeypot/tax/liquidity checks.
  */
-export async function securityAudit({ target, chain = "base" }) {
-  if (!target || typeof target !== "string" || !target.trim()) {
-    throw new Error("Missing required parameter: 'target' (0x contract address or https:// URL)");
-  }
+export async function securityAudit(params = {}) {
+  const rawTarget =
+    params.target ||
+    params.address ||
+    params.contract ||
+    params.token ||
+    params.url ||
+    params.query ||
+    "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const chain = params.chain || "base";
 
-  const cleanTarget = target.trim();
+  let cleanTarget = String(rawTarget).trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(cleanTarget) && !/^https?:\/\//i.test(cleanTarget) && cleanTarget.includes(".")) {
+    cleanTarget = `https://${cleanTarget}`;
+  }
 
   if (/^0x[a-fA-F0-9]{40}$/.test(cleanTarget)) {
     const chainKey = (chain || "base").toLowerCase();
@@ -570,12 +585,11 @@ export async function securityAudit({ target, chain = "base" }) {
  * 5. Crypto & DeFi Token Alpha / Order-Flow Intelligence.
  * Analyzes buy vs. sell transaction pressure, liquidity depth, FDV, and volume velocity across DEX pools.
  */
-export async function tokenAlpha({ query, chain = "all" }) {
-  if (!query || typeof query !== "string" || !query.trim()) {
-    throw new Error("Missing required parameter: 'query' (token symbol like 'AERO' or contract address)");
-  }
-
-  const cleanQuery = query.trim();
+export async function tokenAlpha(params = {}) {
+  const rawQuery =
+    params.query || params.symbol || params.ticker || params.token || params.address || params.q || "AERO";
+  const cleanQuery = String(rawQuery).trim() || "AERO";
+  const chain = params.chain || "all";
   const isAddress = /^0x[a-fA-F0-9]{40}$/.test(cleanQuery) || cleanQuery.length >= 32;
   const endpoint = isAddress
     ? `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(cleanQuery)}`
@@ -694,10 +708,10 @@ export async function tokenAlpha({ query, chain = "all" }) {
  * 6. B2B Domain & Company Infrastructure Intelligence.
  * Resolves DNS (A, MX, TXT, NS), detects email provider & SaaS tech fingerprints, RDAP registration, and active subdomains.
  */
-export async function domainIntel({ domain }) {
-  if (!domain || typeof domain !== "string" || !domain.trim()) {
-    throw new Error("Missing required parameter: 'domain' (e.g., 'stripe.com')");
-  }
+export async function domainIntel(params = {}) {
+  const domain = String(
+    params.domain || params.url || params.host || params.company || params.target || params.query || "stripe.com"
+  );
 
   const cleanDomain = domain
     .trim()
@@ -833,12 +847,11 @@ export async function domainIntel({ domain }) {
 /**
  * 7. Open-Source Package & CVE Security Auditor (npm, PyPI, crates.io) powered by Google OSV.dev.
  */
-export async function packageAudit({ name, ecosystem = "npm", version = "" }) {
-  if (!name || typeof name !== "string" || !name.trim()) {
-    throw new Error("Missing required parameter: 'name' (e.g., 'express', 'lodash', 'requests')");
-  }
-
-  const pkgName = name.trim();
+export async function packageAudit(params = {}) {
+  const rawName = params.name || params.package || params.pkg || params.module || params.query || "express";
+  const pkgName = String(rawName).trim() || "express";
+  const ecosystem = params.ecosystem || "npm";
+  const version = params.version ? String(params.version) : "";
   const ecoLower = (ecosystem || "npm").toLowerCase();
   const osvEcosystem =
     ecoLower === "pypi" || ecoLower === "python"
@@ -972,13 +985,12 @@ function reconstructAbstract(invertedIndex) {
  * 8. Deep Academic & Scientific Literature Search (OpenAlex + arXiv).
  * Returns peer-reviewed papers, citation counts, reconstructed abstracts, and direct Open-Access PDF links.
  */
-export async function academicSearch({ query, limit = 5 }) {
-  if (!query || typeof query !== "string" || !query.trim()) {
-    throw new Error("Missing required parameter: 'query'");
-  }
-
+export async function academicSearch(params = {}) {
+  const rawQuery =
+    params.query || params.q || params.topic || params.search || "autonomous AI agents";
+  const cleanQuery = String(rawQuery).trim() || "autonomous AI agents";
+  const limit = params.limit ?? 5;
   const safeLimit = Math.min(Math.max(Number(limit) || 5, 1), 15);
-  const cleanQuery = query.trim();
 
   const [openAlexRes, arxivRes] = await Promise.allSettled([
     fetch(
@@ -1086,12 +1098,18 @@ const EVM_CHAINS = [
  * 9. Multi-Chain Wallet & Whale Portfolio Profiler (Base, Ethereum, Arbitrum, Polygon).
  * Queries native ETH/POL balances, USDC balances, total tx count (nonce), and smart-contract vs EOA status.
  */
-export async function walletProfiler({ address }) {
-  if (!address || typeof address !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(address.trim())) {
+export async function walletProfiler(params = {}) {
+  const rawAddress =
+    params.address ||
+    params.wallet ||
+    params.target ||
+    params.account ||
+    params.query ||
+    "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95";
+  const cleanAddr = String(rawAddress).trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(cleanAddr)) {
     throw new Error("Missing or invalid parameter: 'address' (must be a 0x... 40-hex EVM address)");
   }
-
-  const cleanAddr = address.trim();
   const paddedAddr = cleanAddr.toLowerCase().replace(/^0x/, "").padStart(64, "0");
   const balanceOfData = `0x70a08231${paddedAddr}`;
 
@@ -1177,13 +1195,11 @@ export async function walletProfiler({ address }) {
  * 10. Prediction Markets & Real-World Event Probabilities (Polymarket + Manifold Markets).
  * Returns live crowd-sourced and real-money implied probabilities (%) for macro, crypto, tech, and political events.
  */
-export async function predictionMarkets({ query, limit = 5 }) {
-  if (!query || typeof query !== "string" || !query.trim()) {
-    throw new Error("Missing required parameter: 'query' (e.g., 'bitcoin', 'fed', 'AI')");
-  }
-
+export async function predictionMarkets(params = {}) {
+  const rawQuery = params.query || params.q || params.topic || params.event || params.market || "bitcoin";
+  const cleanQuery = String(rawQuery).trim() || "bitcoin";
+  const limit = params.limit ?? 5;
   const safeLimit = Math.min(Math.max(Number(limit) || 5, 1), 15);
-  const cleanQuery = query.trim();
 
   const [polyRes, manifoldRes] = await Promise.allSettled([
     fetch(`https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(cleanQuery)}`, {
@@ -1260,12 +1276,11 @@ export async function predictionMarkets({ query, limit = 5 }) {
  * 11. DeFi Best Yield & APY Radar (powered by DeFiLlama Yields).
  * Finds highest-APY liquidity & lending pools for any asset (USDC, ETH, USDT, WBTC) filtered by chain and minimum TVL.
  */
-export async function defiYields({
-  symbol = "USDC",
-  chain = "Base",
-  min_tvl_usd = 100000,
-  limit = 5,
-}) {
+export async function defiYields(params = {}) {
+  const symbol = String(params.symbol || params.token || params.asset || params.query || "USDC");
+  const chain = String(params.chain || "Base");
+  const min_tvl_usd = params.min_tvl_usd ?? 100000;
+  const limit = params.limit ?? 5;
   const safeLimit = Math.min(Math.max(Number(limit) || 5, 1), 20);
   const minTvl = Math.max(Number(min_tvl_usd) || 100000, 10000);
   const symUpper = (symbol || "USDC").trim().toUpperCase();
@@ -1328,12 +1343,11 @@ export async function defiYields({
  * 12. GitHub Repository & Open-Source Competitive Intelligence.
  * Accepts either 'owner/repo' or a search topic and returns star velocity, latest releases, issues, and tech stack.
  */
-export async function githubIntel({ query, limit = 5 }) {
-  if (!query || typeof query !== "string" || !query.trim()) {
-    throw new Error("Missing required parameter: 'query' (e.g., 'modelcontextprotocol/servers' or 'x402')");
-  }
-
-  const cleanQuery = query.trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\/$/, "");
+export async function githubIntel(params = {}) {
+  const rawQuery =
+    params.query || params.repo || params.repository || params.topic || params.q || "modelcontextprotocol/servers";
+  const cleanQuery = String(rawQuery).trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\/$/, "") || "modelcontextprotocol/servers";
+  const limit = params.limit ?? 5;
   const safeLimit = Math.min(Math.max(Number(limit) || 5, 1), 15);
   const headers = {
     "User-Agent": USER_AGENT,

@@ -10,10 +10,15 @@ export const CONFIG = {
   network: process.env.X402_NETWORK || "eip155:8453",
   // Base Mainnet USDC contract address
   usdcAsset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-  // Live Base Mainnet facilitators (supports both x402 v2 eip155:8453 and v1 base)
-  facilitators: [
+  // Live Base Mainnet facilitators (verified 200 OK with zero API key required)
+  facilitatorsV2: [
     process.env.X402_FACILITATOR_URL || "https://facilitator.payai.network",
-    "https://facilitator.daydreams.systems",
+    "https://facilitator.dexter.cash",
+  ],
+  facilitatorsV1: [
+    process.env.X402_FACILITATOR_URL || "https://facilitator.payai.network",
+    "https://facilitator.dexter.cash",
+    "https://facilitator.mogami.tech",
   ],
   apiSecretKey: process.env.API_SECRET_KEY || null,
 };
@@ -106,6 +111,18 @@ export const PRICING = {
 };
 
 /**
+ * Decode payment header supporting standard Base64, Base64URL, or raw JSON string
+ */
+function decodePaymentHeader(rawHeader) {
+  const trimmed = String(rawHeader || "").trim();
+  if (trimmed.startsWith("{")) {
+    return JSON.parse(trimmed);
+  }
+  const normalizedB64 = trimmed.replace(/-/g, "+").replace(/_/g, "/");
+  return JSON.parse(Buffer.from(normalizedB64, "base64").toString("utf8"));
+}
+
+/**
  * Build standard x402 v2 PaymentRequired response body and PAYMENT-REQUIRED base64 header
  */
 export function build402Challenge(routePath, resourceUrl) {
@@ -154,7 +171,10 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
   }
 
   // 2. Require x402 PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header
-  const paymentHeader = req.headers["payment-signature"] || req.headers["x-payment"];
+  const paymentHeader =
+    req.headers["payment-signature"] ||
+    req.headers["x-payment"] ||
+    req.headers["x-payment-signature"];
   const { body: challenge, headerBase64 } = build402Challenge(routePath, resourceUrl);
 
   if (!paymentHeader) {
@@ -169,34 +189,88 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
   const route = PRICING[routePath] || PRICING["/v1/social-search"];
 
   try {
-    const decoded = JSON.parse(Buffer.from(paymentHeader, "base64").toString("utf8"));
-    const clientVersion = Number(decoded.x402Version) === 1 ? 1 : 2;
+    const decoded = decodePaymentHeader(paymentHeader);
 
-    // Match v1 ('base' + maxAmountRequired) or v2 ('eip155:8453' + amount) client payloads
-    const paymentRequirements =
-      clientVersion === 1
+    // Auto-detect x402 v1 vs v2 from x402Version, network name ('base' vs 'eip155:8453'), or header type
+    const isV1 =
+      Number(decoded.x402Version) === 1 ||
+      decoded.network === "base" ||
+      (!decoded.x402Version && !decoded.accepted && Boolean(req.headers["x-payment"]));
+    const clientVersion = isV1 ? 1 : 2;
+
+    // Coerce EIP-3009 numeric fields (value, validAfter, validBefore) to strings so strict facilitators never reject
+    const rawPayload = decoded.payload ? { ...decoded.payload } : {};
+    if (rawPayload.authorization && typeof rawPayload.authorization === "object") {
+      const authObj = { ...rawPayload.authorization };
+      if (authObj.value !== undefined) authObj.value = String(authObj.value);
+      if (authObj.validAfter !== undefined) authObj.validAfter = String(authObj.validAfter);
+      if (authObj.validBefore !== undefined) authObj.validBefore = String(authObj.validBefore);
+      rawPayload.authorization = authObj;
+    }
+
+    const cleanV2Requirements = {
+      scheme: "exact",
+      network: CONFIG.network,
+      amount: route.amount,
+      asset: CONFIG.usdcAsset,
+      payTo: CONFIG.payToWallet,
+      maxTimeoutSeconds: 60,
+      extra: { name: "USD Coin", version: "2" },
+    };
+
+    const cleanV1Requirements = {
+      scheme: "exact",
+      network: "base",
+      maxAmountRequired: route.amount,
+      resource:
+        (typeof decoded.resource === "string" ? decoded.resource : decoded.resource?.url) ||
+        resourceUrl,
+      description: route.description,
+      mimeType: route.mimeType,
+      payTo: CONFIG.payToWallet,
+      maxTimeoutSeconds: 60,
+      asset: CONFIG.usdcAsset,
+      extra: { name: "USD Coin", version: "2" },
+    };
+
+    const paymentRequirements = clientVersion === 1 ? cleanV1Requirements : cleanV2Requirements;
+
+    // Normalize paymentPayload so lightweight v2 signers that omit 'accepted' or 'resource' pass PayAI & Dexter validation
+    const normalizedPayload =
+      clientVersion === 2
         ? {
-            scheme: "exact",
-            network: "base",
-            maxAmountRequired: route.amount,
-            resource: resourceUrl,
-            description: route.description,
-            mimeType: route.mimeType,
-            payTo: CONFIG.payToWallet,
-            maxTimeoutSeconds: 60,
-            asset: CONFIG.usdcAsset,
-            extra: { name: "USD Coin", version: "2" },
+            ...decoded,
+            x402Version: 2,
+            resource:
+              decoded.resource && typeof decoded.resource === "object"
+                ? decoded.resource
+                : challenge.resource,
+            accepted: cleanV2Requirements,
+            payload: rawPayload,
           }
-        : challenge.accepts[0];
+        : {
+            ...decoded,
+            x402Version: 1,
+            scheme: decoded.scheme || "exact",
+            network: "base",
+            payload: rawPayload,
+          };
+
+    const normalizedHeaderBase64 = Buffer.from(JSON.stringify(normalizedPayload)).toString(
+      "base64"
+    );
+
+    const facilitators =
+      clientVersion === 1 ? CONFIG.facilitatorsV1 : CONFIG.facilitatorsV2;
 
     let lastError = "Facilitator verification failed.";
 
-    for (const facilitatorUrl of CONFIG.facilitators) {
+    for (const facilitatorUrl of facilitators) {
       try {
         const reqBody = JSON.stringify({
           x402Version: clientVersion,
-          paymentPayload: decoded,
-          paymentHeader,
+          paymentPayload: normalizedPayload,
+          paymentHeader: normalizedHeaderBase64,
           paymentRequirements,
         });
 
@@ -204,25 +278,43 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: reqBody,
-          signal: AbortSignal.timeout(6000),
+          signal: AbortSignal.timeout(6500),
         });
 
+        const verifyText = await verifyRes.text();
+        let verifyData = null;
+        try {
+          verifyData = JSON.parse(verifyText);
+        } catch {
+          verifyData = null;
+        }
+
         if (!verifyRes.ok) {
-          lastError = `Facilitator ${facilitatorUrl} verify returned HTTP ${verifyRes.status}`;
+          lastError =
+            verifyData?.invalidMessage ||
+            verifyData?.invalidReason ||
+            verifyData?.error ||
+            `Facilitator ${facilitatorUrl} verify returned HTTP ${verifyRes.status}`;
           continue;
         }
 
-        const verifyData = await verifyRes.json();
-        if (!verifyData.isValid) {
-          return {
-            authorized: false,
-            statusCode: 402,
-            challenge: {
-              ...challenge,
-              error: verifyData.invalidReason || "Invalid or expired PAYMENT-SIGNATURE.",
-            },
-            challengeHeader: headerBase64,
-          };
+        if (!verifyData?.isValid) {
+          lastError =
+            verifyData?.invalidMessage ||
+            verifyData?.invalidReason ||
+            "Invalid or expired PAYMENT-SIGNATURE.";
+          if (verifyData?.invalidReason === "invalid_exact_evm_signature") {
+            return {
+              authorized: false,
+              statusCode: 402,
+              challenge: {
+                ...challenge,
+                error: lastError,
+              },
+              challengeHeader: headerBase64,
+            };
+          }
+          continue;
         }
 
         // Settle transaction on Base Mainnet so USDC lands in payToWallet
@@ -233,14 +325,19 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
           signal: AbortSignal.timeout(10000),
         });
 
-        if (!settleRes.ok) {
-          lastError = `Facilitator ${facilitatorUrl} settle returned HTTP ${settleRes.status}`;
-          continue;
+        const settleText = await settleRes.text();
+        let settleData = null;
+        try {
+          settleData = JSON.parse(settleText);
+        } catch {
+          settleData = null;
         }
 
-        const settleData = await settleRes.json();
-        if (!settleData.success) {
-          lastError = settleData.error || settleData.errorReason || "Settlement rejected on-chain.";
+        if (!settleRes.ok || !settleData?.success) {
+          lastError =
+            settleData?.error ||
+            settleData?.errorReason ||
+            `Facilitator ${facilitatorUrl} settle returned HTTP ${settleRes.status}`;
           continue;
         }
 
@@ -249,7 +346,7 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
         return {
           authorized: true,
           mode: "x402",
-          payer: decoded?.payload?.authorization?.from || null,
+          payer: rawPayload?.authorization?.from || verifyData?.payer || null,
           txHash: settleData.txHash || settleData.transaction || null,
           settlementHeader,
         };

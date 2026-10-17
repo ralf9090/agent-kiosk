@@ -266,7 +266,19 @@ export const MCP_TOOLS = [
       required: ["query"],
     },
   },
-];
+].map((tool) => ({
+  ...tool,
+  annotations: {
+    title: tool.name
+      .split("_")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" "),
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+}));
 
 const ROUTE_HANDLERS = {
   "/v1/social-search": socialSearch,
@@ -321,10 +333,11 @@ function sendJson(res, statusCode, payload, extraHeaders = {}) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers":
-      "Content-Type, PAYMENT-SIGNATURE, X-PAYMENT, X-API-KEY, Authorization",
+      "Content-Type, PAYMENT-SIGNATURE, X-PAYMENT, X-PAYMENT-SIGNATURE, X-API-KEY, Authorization, Mcp-Session-Id, Last-Event-Id",
     "Access-Control-Expose-Headers":
-      "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE",
+      "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, Mcp-Session-Id",
     ...extraHeaders,
   });
   res.end(JSON.stringify(payload, null, 2));
@@ -372,9 +385,9 @@ export function createAppServer() {
     if (req.method === "GET" && pathname === "/llms.txt") {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
       const lines = [
-        "# Agent Kiosk — 8-in-1 Autonomous B2A Data, Market Alpha & Security Supermarket (x402 v2 & MCP)",
+        "# Agent Kiosk — 12-in-1 Autonomous B2A Data, Market Alpha & Security Supermarket (x402 v2 & MCP)",
         "",
-        "> No sign-up, no monthly subscription. Autonomous AI agents can query 8 specialized intelligence tools using HTTP x402 v2 (Base USDC) or Model Context Protocol (MCP).",
+        "> No sign-up, no monthly subscription. Autonomous AI agents can query 12 specialized intelligence tools using HTTP x402 v2 (Base USDC) or Model Context Protocol (MCP).",
         "",
         "## Endpoints",
         ...Object.entries(PRICING).map(
@@ -663,7 +676,7 @@ export function createAppServer() {
       });
     }
 
-    // 4. Paid x402 v2 Endpoints (all 8 routes)
+    // 4. Paid x402 v2/v1 Endpoints (all 12 routes)
     if ((req.method === "POST" || req.method === "GET") && ROUTE_HANDLERS[pathname]) {
       const resourceUrl = `${baseUrl}${pathname}`;
       const auth = await verifyAndSettlePayment(req, pathname, resourceUrl);
@@ -675,10 +688,9 @@ export function createAppServer() {
       }
 
       try {
-        const body =
-          req.method === "POST"
-            ? await readJsonBody(req)
-            : Object.fromEntries(urlObj.searchParams.entries());
+        const queryParams = Object.fromEntries(urlObj.searchParams.entries());
+        const jsonBody = req.method === "POST" ? await readJsonBody(req) : {};
+        const body = { ...queryParams, ...jsonBody };
 
         const data = await ROUTE_HANDLERS[pathname](body);
 
@@ -705,25 +717,52 @@ export function createAppServer() {
       }
     }
 
-    // 5. MCP HTTP Endpoint (JSON-RPC 2.0)
+    // 5a. MCP HTTP GET Discovery / Health Check
+    if (req.method === "GET" && pathname === "/mcp") {
+      return sendJson(res, 200, {
+        name: "agent-kiosk",
+        version: "2.3.1",
+        protocol: "mcp-streamable-http",
+        protocolVersion: "2024-11-05",
+        endpoint: `${baseUrl}/mcp`,
+        toolsCount: MCP_TOOLS.length,
+        tools: MCP_TOOLS.map((t) => t.name),
+      });
+    }
+
+    // 5b. MCP HTTP Endpoint (JSON-RPC 2.0)
     if (req.method === "POST" && pathname === "/mcp") {
       try {
         const rpc = await readJsonBody(req);
         const { id, method, params } = rpc;
 
         if (method === "initialize") {
+          const requestedVersion = params?.protocolVersion;
+          const supportedVersions = ["2024-11-05", "2025-03-26", "2025-06-18"];
+          const negotiatedVersion = supportedVersions.includes(requestedVersion)
+            ? requestedVersion
+            : "2024-11-05";
+
           return sendJson(res, 200, {
             jsonrpc: "2.0",
             id,
             result: {
-              protocolVersion: "2024-11-05",
+              protocolVersion: negotiatedVersion,
               capabilities: { tools: {}, resources: {}, prompts: {} },
-              serverInfo: { name: "agent-kiosk", version: "2.2.0" },
+              serverInfo: { name: "agent-kiosk", version: "2.3.1" },
             },
           });
         }
 
-        if (method === "notifications/initialized") {
+        if (method === "ping" || method === "logging/setLevel") {
+          return sendJson(res, 200, {
+            jsonrpc: "2.0",
+            id,
+            result: {},
+          });
+        }
+
+        if (method && method.startsWith("notifications/")) {
           return sendJson(res, 200, { ok: true });
         }
 
@@ -740,6 +779,14 @@ export function createAppServer() {
             jsonrpc: "2.0",
             id,
             result: { resources: [] },
+          });
+        }
+
+        if (method === "resources/templates/list") {
+          return sendJson(res, 200, {
+            jsonrpc: "2.0",
+            id,
+            result: { resourceTemplates: [] },
           });
         }
 
@@ -765,7 +812,9 @@ export function createAppServer() {
           }
 
           const hasPaymentAttempt = Boolean(
-            req.headers["payment-signature"] || req.headers["x-payment"]
+            req.headers["payment-signature"] ||
+              req.headers["x-payment"] ||
+              req.headers["x-payment-signature"]
           );
           const auth = await verifyAndSettlePayment(req, mappedRoute, `${baseUrl}${mappedRoute}`);
 
