@@ -3,7 +3,14 @@
  * Standard MCP stdio server for local/registry integration (Glama, Smithery, Cursor, Claude Desktop)
  */
 import readline from "node:readline";
-import { MCP_TOOLS } from "./server.js";
+import {
+  MCP_TOOLS,
+  MCP_PROMPTS,
+  MCP_RESOURCES,
+  MCP_RESOURCE_TEMPLATES,
+  renderMcpPrompt,
+  readMcpResource,
+} from "./server.js";
 import { CONFIG, PRICING, build402Challenge } from "./x402.js";
 import {
   socialSearch,
@@ -146,7 +153,7 @@ rl.on("line", async (line) => {
       return sendRpc({
         jsonrpc: "2.0",
         id,
-        result: { resources: [] },
+        result: { resources: MCP_RESOURCES },
       });
     }
 
@@ -154,7 +161,23 @@ rl.on("line", async (line) => {
       return sendRpc({
         jsonrpc: "2.0",
         id,
-        result: { resourceTemplates: [] },
+        result: { resourceTemplates: MCP_RESOURCE_TEMPLATES },
+      });
+    }
+
+    if (method === "resources/read") {
+      const found = readMcpResource(params?.uri, BASE_URL);
+      if (!found) {
+        return sendRpc({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32602, message: `Unknown resource URI: ${params?.uri}` },
+        });
+      }
+      return sendRpc({
+        jsonrpc: "2.0",
+        id,
+        result: found,
       });
     }
 
@@ -162,7 +185,23 @@ rl.on("line", async (line) => {
       return sendRpc({
         jsonrpc: "2.0",
         id,
-        result: { prompts: [] },
+        result: { prompts: MCP_PROMPTS },
+      });
+    }
+
+    if (method === "prompts/get") {
+      const rendered = renderMcpPrompt(params?.name, params?.arguments || {});
+      if (!rendered) {
+        return sendRpc({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32602, message: `Unknown prompt: ${params?.name}` },
+        });
+      }
+      return sendRpc({
+        jsonrpc: "2.0",
+        id,
+        result: rendered,
       });
     }
 

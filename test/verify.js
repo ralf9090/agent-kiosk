@@ -370,6 +370,31 @@ try {
   console.log(
     `✅ 23. /v1/stats live telemetry verified (Total requests tracked: ${statsData.funnel_telemetry.total_requests}, Wallet Base USDC: $${statsData.onchain_wallet.base_usdc_balance})`
   );
+
+  // 24. Test Google A2A /.well-known/agent-card.json + MCP prompts/list & resources/list
+  const cardRes = await fetch(`${base}/.well-known/agent-card.json`);
+  assert.equal(cardRes.status, 200);
+  const cardData = await cardRes.json();
+  assert.equal(cardData.skills.length, 19);
+
+  const promptsRes = await fetch(`${base}/mcp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "prompts/list" }),
+  });
+  const promptsData = await promptsRes.json();
+  assert.equal(promptsData.result.prompts.length, 4);
+
+  const resListRes = await fetch(`${base}/mcp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 4, method: "resources/list" }),
+  });
+  const resListData = await resListRes.json();
+  assert.equal(resListData.result.resources.length, 3);
+  console.log(
+    `✅ 24. Google A2A agent-card.json (${cardData.skills.length} skills), MCP Prompts (${promptsData.result.prompts.length}), and MCP Resources (${resListData.result.resources.length}) verified`
+  );
 } finally {
   server.close();
 }

@@ -745,13 +745,274 @@ const STANDARD_200_RESPONSE = {
   },
 };
 
+export const MCP_PROMPTS = [
+  {
+    name: "token_360_due_diligence",
+    description:
+      "Run a complete 360-degree institutional crypto token audit: GoPlus smart contract honeypot/tax check, live DEX buy/sell order-flow alpha, and Reddit/HN social sentiment.",
+    arguments: [
+      {
+        name: "query",
+        description: "Token ticker symbol or 0x contract address (e.g., 'AERO', 'VIRTUAL', 'DEGEN')",
+        required: true,
+      },
+      {
+        name: "chain",
+        description: "Target blockchain (base, ethereum, solana, arbitrum)",
+        required: false,
+      },
+    ],
+  },
+  {
+    name: "autonomous_defi_swap",
+    description:
+      "Screen counterparty/token for AML & OFAC sanctions compliance and build executable EVM DEX swap or cross-chain bridge calldata (LI.FI + ParaSwap).",
+    arguments: [
+      {
+        name: "from_token",
+        description: "Source token symbol or 0x address (e.g., 'USDC')",
+        required: true,
+      },
+      {
+        name: "to_token",
+        description: "Destination token symbol or 0x address (e.g., 'ETH', 'AERO', 'cbBTC')",
+        required: true,
+      },
+      {
+        name: "amount",
+        description: "Human-readable amount to swap (e.g., '100')",
+        required: false,
+      },
+      {
+        name: "from_chain",
+        description: "Source chain (base, ethereum, arbitrum, polygon, optimism)",
+        required: false,
+      },
+    ],
+  },
+  {
+    name: "b2b_company_lead_dossier",
+    description:
+      "Generate a 4-in-1 B2B executive sales dossier: DNS/MX/SaaS tech stack infrastructure, clean website extraction, local HQ phone/email leads, and social mentions.",
+    arguments: [
+      {
+        name: "domain",
+        description: "Company domain name (e.g., 'stripe.com')",
+        required: true,
+      },
+      {
+        name: "location",
+        description: "City or region for physical lead search (e.g., 'San Francisco')",
+        required: false,
+      },
+    ],
+  },
+  {
+    name: "whale_yield_optimizer",
+    description:
+      "Profile a 0x wallet across Base, Ethereum, Arbitrum, and Polygon, and match idle USDC/ETH holdings against top DeFiLlama yield pools.",
+    arguments: [
+      {
+        name: "address",
+        description: "0x EVM wallet address to analyze",
+        required: true,
+      },
+    ],
+  },
+];
+
+export function renderMcpPrompt(name, args = {}) {
+  if (name === "token_360_due_diligence") {
+    const q = args.query || "AERO";
+    const c = args.chain || "base";
+    return {
+      description: `360° Token Due Diligence workflow for ${q} on ${c}`,
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Call the \`token_due_diligence\` tool with query="${q}" and chain="${c}". Summarize the investment grade (A-F), GoPlus honeypot/tax audit flags, 1h/24h DEX buy-vs-sell order flow, and recent community sentiment.`,
+          },
+        },
+      ],
+    };
+  }
+  if (name === "autonomous_defi_swap") {
+    const fromT = args.from_token || "USDC";
+    const toT = args.to_token || "ETH";
+    const amt = args.amount || "10";
+    const ch = args.from_chain || "base";
+    return {
+      description: `Compliant DeFi Swap Calldata workflow (${amt} ${fromT} -> ${toT} on ${ch})`,
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `First call \`defi_swap_quote\` with from_token="${fromT}", to_token="${toT}", amount="${amt}", from_chain="${ch}" to get the optimal DEX route and ready-to-sign EVM transactionRequest calldata. If a wallet address is involved, also verify it with \`compliance_check\`.`,
+          },
+        },
+      ],
+    };
+  }
+  if (name === "b2b_company_lead_dossier") {
+    const dom = args.domain || "stripe.com";
+    const loc = args.location || "San Francisco";
+    return {
+      description: `4-in-1 B2B Company & Lead Dossier for ${dom}`,
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Call \`b2b_company_dossier\` with domain="${dom}" and location="${loc}". Present the company's email/SaaS infrastructure, active subdomains, website summary, verified physical phone/email leads, and social mentions.`,
+          },
+        },
+      ],
+    };
+  }
+  if (name === "whale_yield_optimizer") {
+    const addr = args.address || "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+    return {
+      description: `Multi-chain Whale Portfolio & Yield Optimization for ${addr}`,
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Call \`whale_alpha_radar\` with address="${addr}". Report the wallet tier, 4-chain USDC/ETH holdings, and projected annual yield from the highest APY Base DeFi pools.`,
+          },
+        },
+      ],
+    };
+  }
+  return null;
+}
+
+export const MCP_RESOURCES = [
+  {
+    uri: "kiosk://catalog/pricing",
+    name: "Agent Kiosk 19-in-1 x402 Pricing & Endpoint Catalog",
+    description:
+      "Complete machine-readable catalog of all 19 attested x402 Base USDC endpoints, MCP tool mappings, and JSON schemas.",
+    mimeType: "application/json",
+  },
+  {
+    uri: "kiosk://guides/x402-quickstart",
+    name: "Autonomous Agent x402 Payment & $5 Prepaid Pass Guide",
+    description:
+      "How AI agents unlock full unmasked datasets using per-call x402 Base USDC signatures or a 30-day ak_live_... Prepaid API Pass.",
+    mimeType: "text/markdown",
+  },
+  {
+    uri: "kiosk://stats/telemetry",
+    name: "Live Server Funnel & Base USDC Wallet Telemetry",
+    description:
+      "Real-time request counters, MCP discovery events, x402 challenges, and recipient wallet info.",
+    mimeType: "application/json",
+  },
+];
+
+export const MCP_RESOURCE_TEMPLATES = [
+  {
+    uriTemplate: "kiosk://tools/{tool_name}",
+    name: "Individual Tool Schema & x402 Pricing Descriptor",
+    description:
+      "Inspect input JSON schema, Base USDC price, and example payload for any of the 19 Agent Kiosk tools.",
+    mimeType: "application/json",
+  },
+];
+
+export function readMcpResource(uri, baseUrl = "https://agent-kiosk.vercel.app") {
+  if (uri === "kiosk://catalog/pricing") {
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: "application/json",
+          text: JSON.stringify(
+            {
+              service: "Agent Kiosk",
+              version: "2.5.0",
+              network: CONFIG.network,
+              asset: CONFIG.usdcAsset,
+              payTo: CONFIG.payToWallet,
+              endpoints: PRICING,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+  if (uri === "kiosk://guides/x402-quickstart") {
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: "text/markdown",
+          text: [
+            "# Agent Kiosk — x402 v2 & Prepaid Pass Quickstart",
+            "",
+            "1. **Free MCP Teaser Mode:** Calling any tool on `POST " +
+              baseUrl +
+              "/mcp` without payment returns HTTP 200 with a 1-item preview and an `x402_unlock_full_data` block.",
+            "2. **Pay-Per-Call (`$0.001 - $0.10 USDC` on Base `eip155:8453`):** Send `POST " +
+              baseUrl +
+              "/v1/<endpoint>` with a signed `PAYMENT-SIGNATURE` (v2) or `X-PAYMENT` (v1) EIP-3009 header to receive the full attested dataset.",
+            "3. **30-Day Prepaid Pass (`$5.00 USDC`):** Call `POST " +
+              baseUrl +
+              "/v1/buy-pass` once with x402 payment to mint a stateless `ak_live_...` key, then pass `X-API-KEY: ak_live_...` on all REST and MCP calls for 30 days.",
+          ].join("\n"),
+        },
+      ],
+    };
+  }
+  if (uri === "kiosk://stats/telemetry") {
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: "application/json",
+          text: JSON.stringify(TELEMETRY, null, 2),
+        },
+      ],
+    };
+  }
+  if (uri && uri.startsWith("kiosk://tools/")) {
+    const toolName = uri.replace("kiosk://tools/", "").trim();
+    const tool = MCP_TOOLS.find((t) => t.name === toolName);
+    const route = TOOL_TO_ROUTE[toolName];
+    if (tool && route) {
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify(
+              {
+                tool,
+                x402_endpoint: `${baseUrl}${route}`,
+                pricing: PRICING[route],
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  }
+  return null;
+}
+
 export function createAppServer() {
   return http.createServer(async (req, res) => {
     if (req.method === "OPTIONS") {
       return sendJson(res, 200, { ok: true });
     }
-
-    TELEMETRY.total_requests += 1;
 
     const proto = (req.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
     const host = req.headers.host || `localhost:${PORT}`;
@@ -904,13 +1165,65 @@ export function createAppServer() {
       );
     }
 
-    // 1c. IndexNow Verification Key File
+    // 1c. IndexNow & Wellknown Verification Files
     if (req.method === "GET" && pathname === "/a1af2789615a4324b3f183b97834ece8.txt") {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
       return res.end("a1af2789615a4324b3f183b97834ece8");
     }
 
-    // 1d. Standard MCP & AI Plugin Discovery Manifests
+    if (
+      req.method === "GET" &&
+      (pathname === "/.well-known/wellknown-verify.txt" || pathname === "/.wellknown-verify")
+    ) {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      return res.end("wellknown-verify=wk-vMxD2c79jXgl0xSHjP2Gptu5\n");
+    }
+
+    // 1d. Google A2A Agent Card (/.well-known/agent-card.json) & Standard MCP Discovery Manifests
+    if (req.method === "GET" && pathname === "/.well-known/agent-card.json") {
+      return sendJson(res, 200, {
+        schemaVersion: "1.0",
+        name: "Agent Kiosk — 19-in-1 B2A Intelligence, Action & x402 API",
+        description:
+          "19-in-1 Autonomous B2A Intelligence, Executable DeFi Swap/Bridge Calldata Builder, AML/OFAC Compliance Screening, Token 360 Verdicts, Whale Portfolio Radar, and B2B Lead Dossiers settled in Base USDC via x402 v2 and MCP.",
+        url: baseUrl,
+        version: "2.5.0",
+        provider: {
+          organization: "Agent Kiosk",
+          url: "https://github.com/ralf9090/agent-kiosk",
+        },
+        capabilities: {
+          streaming: false,
+          pushNotifications: false,
+          stateTransitionHistory: false,
+        },
+        authentication: {
+          schemes: ["x402", "ApiKey"],
+          credentials: `Pay per request ($0.001-$0.10 USDC on Base eip155:8453 to ${CONFIG.payToWallet}) or mint a $5.00 30-day X-API-KEY pass at ${baseUrl}/v1/buy-pass`,
+        },
+        defaultInputModes: ["application/json", "text/plain"],
+        defaultOutputModes: ["application/json", "text/markdown"],
+        endpoints: {
+          mcp: `${baseUrl}/mcp`,
+          openapi: `${baseUrl}/openapi.json`,
+          x402: `${baseUrl}/.well-known/x402.json`,
+          stats: `${baseUrl}/stats`,
+        },
+        skills: MCP_TOOLS.map((t) => {
+          const r = TOOL_TO_ROUTE[t.name];
+          const p = PRICING[r];
+          return {
+            id: t.name,
+            name: t.annotations?.title || t.name,
+            description: `${t.description} (x402: POST ${baseUrl}${r} — $${p?.priceUsd || "0.02"} USDC on Base)`,
+            tags: p?.tags || ["x402", "mcp", "base", "usdc", "attested"],
+            inputModes: ["application/json"],
+            outputModes: ["application/json", "text/markdown"],
+          };
+        }),
+      });
+    }
+
     if (req.method === "GET" && pathname === "/.well-known/mcp.json") {
       return sendJson(res, 200, {
         mcpVersion: "2024-11-05",
@@ -924,6 +1237,8 @@ export function createAppServer() {
           smithery: "https://agent-kiosk--batuhansenavci.run.tools",
         },
         tools: MCP_TOOLS,
+        prompts: MCP_PROMPTS,
+        resources: MCP_RESOURCES,
       });
     }
 
@@ -1269,7 +1584,7 @@ export function createAppServer() {
           return sendJson(res, 200, {
             jsonrpc: "2.0",
             id,
-            result: { resources: [] },
+            result: { resources: MCP_RESOURCES },
           });
         }
 
@@ -1277,7 +1592,23 @@ export function createAppServer() {
           return sendJson(res, 200, {
             jsonrpc: "2.0",
             id,
-            result: { resourceTemplates: [] },
+            result: { resourceTemplates: MCP_RESOURCE_TEMPLATES },
+          });
+        }
+
+        if (method === "resources/read") {
+          const found = readMcpResource(params?.uri, baseUrl);
+          if (!found) {
+            return sendJson(res, 200, {
+              jsonrpc: "2.0",
+              id,
+              error: { code: -32602, message: `Unknown resource URI: ${params?.uri}` },
+            });
+          }
+          return sendJson(res, 200, {
+            jsonrpc: "2.0",
+            id,
+            result: found,
           });
         }
 
@@ -1285,7 +1616,23 @@ export function createAppServer() {
           return sendJson(res, 200, {
             jsonrpc: "2.0",
             id,
-            result: { prompts: [] },
+            result: { prompts: MCP_PROMPTS },
+          });
+        }
+
+        if (method === "prompts/get") {
+          const rendered = renderMcpPrompt(params?.name, params?.arguments || {});
+          if (!rendered) {
+            return sendJson(res, 200, {
+              jsonrpc: "2.0",
+              id,
+              error: { code: -32602, message: `Unknown prompt: ${params?.name}` },
+            });
+          }
+          return sendJson(res, 200, {
+            jsonrpc: "2.0",
+            id,
+            result: rendered,
           });
         }
 
