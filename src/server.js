@@ -1415,7 +1415,7 @@ export function createAppServer() {
           "X-Siftah-Mode": "1",
           "PAYMENT-SIGNATURE": b64Header
         },
-        body: JSON.stringify({ message: "siftah-x402", query: "AERO", address: PAY_TO, domain: "stripe.com", url: "https://example.com", name: "lodash" })
+        body: JSON.stringify({ message: "siftah-x402", query: "AERO", address: PAY_TO, domain: "stripe.com", url: "https://example.com", name: "lodash", token_in: "USDC", token_out: "WETH", amount: "10" })
       });
 
       const data = await res.json();
@@ -1435,7 +1435,18 @@ export function createAppServer() {
           break;
         }
       }
+      logMsg("✅ Tüm seçili servisler tamamlandı!");
     }
+
+    window.addEventListener("load", () => {
+      if (window.location.search.includes("last3=1")) {
+        setTimeout(async () => {
+          logMsg("✨ Kalan son 3 servis (17, 18, 19) otomatik başlatılıyor...");
+          await runSiftah(["/v1/compliance-check", "/v1/defi-swap-quote", "/v1/buy-pass"]);
+          setTimeout(() => { window.location.href = "/stats"; }, 2500);
+        }, 600);
+      }
+    });
   </script>
 </body>
 </html>`);

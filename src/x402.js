@@ -727,7 +727,13 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
       req.headers["x-siftah-mode"] === "1" &&
       String(rawPayload?.authorization?.from || "").toLowerCase() ===
         CONFIG.payToWallet.toLowerCase();
-    const effectiveAmount = isOwnerSiftah ? "1000" : route.amount;
+    const signedValStr = String(rawPayload?.authorization?.value || "");
+    const signedValNum = /^\d+$/.test(signedValStr) ? Number(signedValStr) : 0;
+    const effectiveAmount = isOwnerSiftah
+      ? "1000"
+      : routePath !== "/v1/buy-pass" && signedValNum >= 1000
+      ? signedValStr
+      : route.amount;
 
     const cleanV2Requirements = {
       scheme: "exact",
