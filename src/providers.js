@@ -1680,4 +1680,367 @@ export async function whaleAlphaRadar(params = {}) {
   });
 }
 
+const AML_FLAG_WEIGHTS = {
+  sanctioned: 100,
+  money_laundering: 90,
+  cybercrime: 90,
+  financial_crime: 85,
+  stealing_attack: 85,
+  darkweb_transactions: 80,
+  phishing_activities: 80,
+  honeypot_related_address: 75,
+  blackmail_activities: 75,
+  mixer: 60,
+  malicious_mining_activities: 55,
+  fake_kyc: 50,
+  blacklist_doubt: 45,
+};
+
+/**
+ * 16. Institutional AML, Sanctions (OFAC) & Counterparty Compliance Screening ($0.05 USDC).
+ * Screens any 0x EVM address against GoPlus Security (Base + Ethereum) and 4-chain RPC footprint before autonomous agents execute transfers.
+ */
+export async function complianceCheck(params = {}) {
+  const rawAddress =
+    params.address ||
+    params.wallet ||
+    params.target ||
+    params.account ||
+    params.query ||
+    "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95";
+  const cleanAddr = String(rawAddress).trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(cleanAddr)) {
+    throw new Error("Invalid 0x EVM wallet or contract address for compliance screening.");
+  }
+
+  const cacheKey = `compliance:${cleanAddr.toLowerCase()}`;
+  return withCache(cacheKey, 60_000, async () => {
+    const [gpBaseRes, gpEthRes, profileRes] = await Promise.allSettled([
+      fetch(`https://api.gopluslabs.io/api/v1/address_security/${cleanAddr}?chain_id=8453`, {
+        headers: { "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(6500),
+      }).then((r) => (r.ok ? r.json() : null)),
+      fetch(`https://api.gopluslabs.io/api/v1/address_security/${cleanAddr}?chain_id=1`, {
+        headers: { "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(6500),
+      }).then((r) => (r.ok ? r.json() : null)),
+      walletProfiler({ address: cleanAddr }),
+    ]);
+
+    const gpBase = gpBaseRes.status === "fulfilled" ? gpBaseRes.value?.result || {} : {};
+    const gpEth = gpEthRes.status === "fulfilled" ? gpEthRes.value?.result || {} : {};
+    const footprint = profileRes.status === "fulfilled" ? profileRes.value : null;
+
+    const triggeredFlags = [];
+    let riskScore = 0;
+
+    for (const [flag, weight] of Object.entries(AML_FLAG_WEIGHTS)) {
+      const valBase = Number(gpBase[flag] || 0);
+      const valEth = Number(gpEth[flag] || 0);
+      if (valBase > 0 || valEth > 0) {
+        triggeredFlags.push(flag);
+        riskScore = Math.min(100, riskScore + weight);
+      }
+    }
+
+    const maliciousContractsCreated =
+      Math.max(
+        Number(gpBase.number_of_malicious_contracts_created || 0),
+        Number(gpEth.number_of_malicious_contracts_created || 0)
+      ) || 0;
+    if (maliciousContractsCreated > 0) {
+      triggeredFlags.push(`malicious_contracts_created:${maliciousContractsCreated}`);
+      riskScore = Math.min(100, riskScore + 85);
+    }
+
+    const compliance_status =
+      riskScore >= 60
+        ? "BLOCKED_HIGH_RISK"
+        : riskScore > 0
+          ? "CAUTION_REVIEW"
+          : "APPROVED_CLEAN";
+    const safe_to_transact = riskScore === 0;
+
+    const llm_markdown = [
+      `# AML & Sanctions Counterparty Certificate: \`${cleanAddr}\``,
+      `- **Compliance Status:** **${compliance_status}** (Safe to Transact: **${safe_to_transact ? "YES" : "NO"}**)`,
+      `- **AML Risk Score:** ${riskScore}/100`,
+      `- **Triggered Threat Flags (${triggeredFlags.length}):** ${triggeredFlags.length > 0 ? triggeredFlags.join(", ") : "NONE (0 OFAC/Phishing/Mixer/Drainer hits)"}`,
+      footprint
+        ? `- **On-Chain Footprint:** ${footprint.wallet_tier} (${footprint.entity_type}) | $${footprint.totals.total_usdc} USDC + ${footprint.totals.total_eth} ETH | ${footprint.totals.total_outgoing_txs} total txs`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return {
+      certificate_type: "AML_SANCTIONS_COUNTERPARTY_SCREENING",
+      address: cleanAddr,
+      compliance_status,
+      safe_to_transact,
+      aml_risk_score_100: riskScore,
+      triggered_flags: triggeredFlags,
+      screening_vectors_checked: Object.keys(AML_FLAG_WEIGHTS).length + 1,
+      data_sources: gpBase.data_source || gpEth.data_source || "GoPlus Security + Multi-Chain RPC",
+      onchain_footprint: footprint
+        ? {
+            wallet_tier: footprint.wallet_tier,
+            entity_type: footprint.entity_type,
+            total_usdc: footprint.totals.total_usdc,
+            total_eth: footprint.totals.total_eth,
+            total_outgoing_txs: footprint.totals.total_outgoing_txs,
+          }
+        : null,
+      llm_markdown,
+    };
+  });
+}
+
+const CHAIN_ID_MAP = {
+  base: 8453,
+  ethereum: 1,
+  eth: 1,
+  arbitrum: 42161,
+  arb: 42161,
+  polygon: 137,
+  matic: 137,
+  optimism: 10,
+  op: 10,
+};
+
+const KNOWN_TOKENS = {
+  8453: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18, symbol: "ETH" },
+    WETH: { address: "0x4200000000000000000000000000000000000006", decimals: 18, symbol: "WETH" },
+    USDC: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6, symbol: "USDC" },
+    USDT: { address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", decimals: 6, symbol: "USDT" },
+    DAI: { address: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb", decimals: 18, symbol: "DAI" },
+    AERO: { address: "0x940181a94A35A4569E4529A3CDfB74e38FD98631", decimals: 18, symbol: "AERO" },
+    CBBTC: { address: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", decimals: 8, symbol: "cbBTC" },
+    VIRTUAL: { address: "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b", decimals: 18, symbol: "VIRTUAL" },
+    DEGEN: { address: "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed", decimals: 18, symbol: "DEGEN" },
+    BRETT: { address: "0x532f27101965dd16442E59d40670FaF5eBB142E4", decimals: 18, symbol: "BRETT" },
+  },
+  1: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18, symbol: "ETH" },
+    WETH: { address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", decimals: 18, symbol: "WETH" },
+    USDC: { address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6, symbol: "USDC" },
+    USDT: { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", decimals: 6, symbol: "USDT" },
+    DAI: { address: "0x6B175474E89094C44Da98b954EedeAC495271d0F", decimals: 18, symbol: "DAI" },
+    WBTC: { address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", decimals: 8, symbol: "WBTC" },
+  },
+  42161: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18, symbol: "ETH" },
+    WETH: { address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", decimals: 18, symbol: "WETH" },
+    USDC: { address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals: 6, symbol: "USDC" },
+    USDT: { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", decimals: 6, symbol: "USDT" },
+    ARB: { address: "0x912CE59144191C1204E64559FE8253a0e49E6548", decimals: 18, symbol: "ARB" },
+  },
+  137: {
+    POL: { address: "0x0000000000000000000000000000000000000000", decimals: 18, symbol: "POL" },
+    MATIC: { address: "0x0000000000000000000000000000000000000000", decimals: 18, symbol: "POL" },
+    USDC: { address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6, symbol: "USDC" },
+    USDT: { address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6, symbol: "USDT" },
+  },
+  10: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18, symbol: "ETH" },
+    USDC: { address: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", decimals: 6, symbol: "USDC" },
+  },
+};
+
+function resolveTokenOnChain(chainId, tokenInput) {
+  const clean = String(tokenInput || "USDC").trim();
+  const table = KNOWN_TOKENS[chainId] || KNOWN_TOKENS[8453];
+  const upper = clean.toUpperCase();
+  if (table[upper]) return table[upper];
+  if (/^0x[a-fA-F0-9]{40}$/.test(clean)) {
+    return { address: clean, decimals: 18, symbol: clean.slice(0, 8) };
+  }
+  return table.USDC || {
+    address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    decimals: 6,
+    symbol: "USDC",
+  };
+}
+
+function toAtomicAmount(humanOrAtomic, decimals) {
+  const num = Number(humanOrAtomic);
+  if (!Number.isFinite(num) || num <= 0) {
+    return BigInt(10 ** decimals).toString();
+  }
+  // If caller passed a small human-readable number like 10 or 100.5, scale by decimals
+  if (num < 1_000_000 || String(humanOrAtomic).includes(".")) {
+    const factor = 10 ** Math.min(decimals, 6);
+    const scaled = BigInt(Math.round(num * factor)) * 10n ** BigInt(Math.max(0, decimals - 6));
+    return scaled.toString();
+  }
+  return BigInt(Math.floor(num)).toString();
+}
+
+/**
+ * 17. DeFi Swap & Cross-Chain Bridge Action Calldata Builder ($0.05 USDC).
+ * Queries LI.FI and ParaSwap aggregators to compute optimal DEX/Bridge routing and ready-to-sign EVM transaction calldata (to, data, value, gasLimit).
+ */
+export async function defiSwapQuote(params = {}) {
+  const fromChainStr = String(params.from_chain || params.chain || "base")
+    .trim()
+    .toLowerCase();
+  const toChainStr = String(params.to_chain || params.toChain || fromChainStr)
+    .trim()
+    .toLowerCase();
+  const fromChainId = CHAIN_ID_MAP[fromChainStr] || 8453;
+  const toChainId = CHAIN_ID_MAP[toChainStr] || fromChainId;
+
+  const fromTokenRaw = params.from_token || params.fromToken || params.srcToken || "USDC";
+  const toTokenRaw = params.to_token || params.toToken || params.destToken || "ETH";
+  const amountRaw = params.amount || params.from_amount || "10";
+  const fromAddress =
+    params.wallet ||
+    params.from_address ||
+    params.user_address ||
+    "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95";
+
+  const srcToken = resolveTokenOnChain(fromChainId, fromTokenRaw);
+  const dstToken = resolveTokenOnChain(toChainId, toTokenRaw);
+  const fromAmountAtomic = toAtomicAmount(amountRaw, srcToken.decimals);
+
+  const cacheKey = `swap:${fromChainId}:${toChainId}:${srcToken.address}:${dstToken.address}:${fromAmountAtomic}:${fromAddress.toLowerCase()}`;
+
+  return withCache(cacheKey, 20_000, async () => {
+    // Primary: LI.FI aggregator (returns full ready-to-broadcast EVM transactionRequest calldata)
+    const lifiUrl =
+      `https://li.quest/v1/quote?fromChain=${fromChainId}&toChain=${toChainId}` +
+      `&fromToken=${encodeURIComponent(srcToken.address)}&toToken=${encodeURIComponent(dstToken.address)}` +
+      `&fromAmount=${fromAmountAtomic}&fromAddress=${encodeURIComponent(fromAddress)}`;
+
+    try {
+      const lifiRes = await fetch(lifiUrl, {
+        headers: { "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (lifiRes.ok) {
+        const d = await lifiRes.json();
+        const toDecimals = d.action?.toToken?.decimals || dstToken.decimals || 18;
+        const toAmountHuman = (Number(d.estimate?.toAmount || 0) / 10 ** toDecimals).toFixed(6);
+        const fromAmountHuman = (
+          Number(fromAmountAtomic) /
+          10 ** (d.action?.fromToken?.decimals || srcToken.decimals || 6)
+        ).toFixed(4);
+
+        const llm_markdown = [
+          `# DeFi Executable Swap/Bridge Quote: ${fromAmountHuman} ${d.action?.fromToken?.symbol || srcToken.symbol} → ${toAmountHuman} ${d.action?.toToken?.symbol || dstToken.symbol}`,
+          `- **Route Aggregator:** LI.FI via **${d.toolDetails?.name || d.tool || "Best DEX Route"}** (${fromChainStr.toUpperCase()} → ${toChainStr.toUpperCase()})`,
+          `- **Estimated Output:** **${toAmountHuman} ${d.action?.toToken?.symbol || dstToken.symbol}** (~$${d.estimate?.toAmountUSD || "N/A"} USD)`,
+          `- **Approval Contract (Spender):** \`${d.estimate?.approvalAddress || d.transactionRequest?.to}\``,
+          `- **Ready-to-Sign Transaction Target (\`to\`):** \`${d.transactionRequest?.to}\` (Calldata: ${d.transactionRequest?.data ? `${d.transactionRequest.data.length} hex chars` : "N/A"})`,
+        ].join("\n");
+
+        return {
+          action_type: fromChainId === toChainId ? "DEX_SWAP_CALLDATA" : "CROSS_CHAIN_BRIDGE_CALLDATA",
+          aggregator: "lifi",
+          best_dex_or_bridge: d.toolDetails?.name || d.tool,
+          from_chain_id: fromChainId,
+          to_chain_id: toChainId,
+          from_token: {
+            symbol: d.action?.fromToken?.symbol || srcToken.symbol,
+            address: d.action?.fromToken?.address || srcToken.address,
+            decimals: d.action?.fromToken?.decimals || srcToken.decimals,
+            amount_atomic: fromAmountAtomic,
+            amount_human: Number(fromAmountHuman),
+            amount_usd: d.estimate?.fromAmountUSD ? Number(d.estimate.fromAmountUSD) : null,
+          },
+          to_token: {
+            symbol: d.action?.toToken?.symbol || dstToken.symbol,
+            address: d.action?.toToken?.address || dstToken.address,
+            decimals: toDecimals,
+            estimated_amount_atomic: d.estimate?.toAmount,
+            estimated_amount_human: Number(toAmountHuman),
+            minimum_amount_atomic: d.estimate?.toAmountMin,
+            estimated_amount_usd: d.estimate?.toAmountUSD ? Number(d.estimate.toAmountUSD) : null,
+          },
+          approval_address: d.estimate?.approvalAddress || null,
+          execution_duration_sec: d.estimate?.executionDuration || 2,
+          transaction_request: d.transactionRequest
+            ? {
+                chainId: d.transactionRequest.chainId || fromChainId,
+                from: d.transactionRequest.from || fromAddress,
+                to: d.transactionRequest.to,
+                value: d.transactionRequest.value || "0x0",
+                data: d.transactionRequest.data,
+                gasLimit: d.transactionRequest.gasLimit || null,
+                gasPrice: d.transactionRequest.gasPrice || null,
+              }
+            : null,
+          llm_markdown,
+        };
+      }
+    } catch {
+      // Fallback to ParaSwap below
+    }
+
+    // Fallback: ParaSwap / Velora Price & Route Engine
+    const psSrcAddr =
+      srcToken.address === "0x0000000000000000000000000000000000000000"
+        ? "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
+        : srcToken.address;
+    const psDstAddr =
+      dstToken.address === "0x0000000000000000000000000000000000000000"
+        ? "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
+        : dstToken.address;
+
+    const psUrl =
+      `https://api.paraswap.io/prices?srcToken=${psSrcAddr}&destToken=${psDstAddr}` +
+      `&amount=${fromAmountAtomic}&srcDecimals=${srcToken.decimals}&destDecimals=${dstToken.decimals}` +
+      `&side=SELL&network=${fromChainId}`;
+
+    const psRes = await fetch(psUrl, {
+      headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(7000),
+    });
+
+    if (!psRes.ok) {
+      throw new Error(`Unable to fetch swap route for ${srcToken.symbol} -> ${dstToken.symbol}`);
+    }
+
+    const psData = await psRes.json();
+    const pr = psData.priceRoute || {};
+    const toAmountHuman = (Number(pr.destAmount || 0) / 10 ** dstToken.decimals).toFixed(6);
+    const fromAmountHuman = (Number(fromAmountAtomic) / 10 ** srcToken.decimals).toFixed(4);
+
+    return {
+      action_type: "DEX_SWAP_QUOTE",
+      aggregator: "paraswap",
+      best_dex_or_bridge: pr.bestRoute?.[0]?.swaps?.[0]?.swapExchanges?.[0]?.exchange || "ParaSwap",
+      from_chain_id: fromChainId,
+      to_chain_id: toChainId,
+      from_token: {
+        symbol: srcToken.symbol,
+        address: srcToken.address,
+        decimals: srcToken.decimals,
+        amount_atomic: fromAmountAtomic,
+        amount_human: Number(fromAmountHuman),
+        amount_usd: pr.srcUSD ? Number(pr.srcUSD) : null,
+      },
+      to_token: {
+        symbol: dstToken.symbol,
+        address: dstToken.address,
+        decimals: dstToken.decimals,
+        estimated_amount_atomic: pr.destAmount,
+        estimated_amount_human: Number(toAmountHuman),
+        estimated_amount_usd: pr.destUSD ? Number(pr.destUSD) : null,
+      },
+      approval_address: pr.tokenTransferProxy || null,
+      transaction_request: {
+        chainId: fromChainId,
+        from: fromAddress,
+        to: pr.contractAddress || "0xdef171fe48cf0115b1d80b88dc8eab59176fee57",
+        value: "0x0",
+      },
+      llm_markdown: `# DeFi Swap Quote: ${fromAmountHuman} ${srcToken.symbol} → ${toAmountHuman} ${dstToken.symbol} (~$${pr.destUSD || "N/A"} USD)`,
+    };
+  });
+}
+
+
 

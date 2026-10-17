@@ -1,7 +1,7 @@
 {
   "name": "agent-kiosk",
-  "version": "2.4.1",
-  "description": "17-in-1 B2A Intelligence Supermarket: Token Verdicts, B2B Dossiers, Whale Portfolio Radar, DeFi Alpha, Security Audits, B2B Leads & Research via x402 (Base USDC) and MCP",
+  "version": "2.5.0",
+  "description": "19-in-1 B2A Intelligence, Action Calldata & Compliance Supermarket: DeFi Swap Calldata, AML/OFAC Screening, Token Verdicts, B2B Dossiers, Whale Portfolio Radar, DeFi Alpha & Security Audits via x402 (Base USDC) and MCP",
   "license": "MIT",
   "type": "module",
   "main": "src/server.js",

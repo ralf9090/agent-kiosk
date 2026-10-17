@@ -16,7 +16,7 @@ try {
   assert.equal(discRes.status, 200);
   const disc = await discRes.json();
   assert.equal(disc.x402Version, 2);
-  assert.equal(disc.resources.length, 17);
+  assert.equal(disc.resources.length, 19);
 
   const favRes = await fetch(`${base}/favicon.ico`);
   assert.equal(favRes.status, 200);
@@ -25,8 +25,8 @@ try {
   assert.equal(openApiRes.status, 200);
   const openApi = await openApiRes.json();
   assert.ok(openApi.info.contact.email);
-  assert.equal(Object.keys(openApi.paths).length, 17);
-  console.log("✅ 1. Discovery manifest, /openapi.json (17 paths), and /favicon.ico verified");
+  assert.equal(Object.keys(openApi.paths).length, 19);
+  console.log("✅ 1. Discovery manifest, /openapi.json (19 paths), and /favicon.ico verified");
 
   // 2. Test unauthenticated REST request returns HTTP 402 with x402Version 2, PAYMENT-REQUIRED header, and full Coinbase Bazaar schema
   const unpaidRes = await fetch(`${base}/v1/wallet-profiler`, {
@@ -40,9 +40,10 @@ try {
   const decodedChallenge = JSON.parse(Buffer.from(prHeader, "base64").toString("utf8"));
   assert.equal(decodedChallenge.resource.serviceName, "Agent Kiosk");
   assert.ok(Array.isArray(decodedChallenge.resource.tags));
+  assert.ok(decodedChallenge.resource.tags.includes("attested"));
   assert.equal(decodedChallenge.extensions.bazaar.info.input.discoverable, true);
 
-  // Also test authorized /v1/ping ($0.001 USDC)
+  // Also test authorized /v1/ping ($0.001 USDC) + cryptographic attestation
   const pingRes = await fetch(`${base}/v1/ping`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
@@ -52,7 +53,9 @@ try {
   const pingData = await pingRes.json();
   assert.equal(pingData.data.status, "pong");
   assert.equal(pingData.data.echo, "bazaar-ready");
-  console.log("✅ 2. HTTP 402 v2 + Coinbase Bazaar extensions.bazaar schema + /v1/ping ($0.001) verified");
+  assert.ok(pingData.attestation?.signature);
+  assert.ok(pingData.attestation?.payload_sha256);
+  console.log("✅ 2. HTTP 402 v2 + Coinbase Bazaar schema + /v1/ping ($0.001) + HMAC Attestation verified");
 
   // 3. Test authorized /v1/social-search
   const socialRes = await fetch(`${base}/v1/social-search`, {
@@ -290,7 +293,7 @@ try {
     `✅ 18. /v1/buy-pass ($5.00 Prepaid Pass) & Smart Cache verified (Cache response in ${elapsedMs}ms)`
   );
 
-  // 19. Test MCP JSON-RPC tools/list returns all 17 tools
+  // 19. Test MCP JSON-RPC tools/list returns all 19 tools
   const mcpRes = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -298,10 +301,10 @@ try {
   });
   assert.equal(mcpRes.status, 200);
   const mcpData = await mcpRes.json();
-  assert.equal(mcpData.result.tools.length, 17);
-  console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 17 tools");
+  assert.equal(mcpData.result.tools.length, 19);
+  console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 19 tools");
 
-  // 20. Test unpaid MCP tools/call returns HTTP 200 Freemium Teaser Preview + x402 unlock hook
+  // 20. Test unpaid MCP tools/call returns HTTP 200 Freemium Teaser Preview + x402 unlock hook + attestation
   const mcpCallRes = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -317,9 +320,56 @@ try {
   const teaserContent = JSON.parse(mcpCallJson.result.content[0].text);
   assert.equal(teaserContent.tier, "FREE_MCP_TEASER_PREVIEW");
   assert.equal(teaserContent.preview_data.leads.length, 1);
+  assert.ok(teaserContent.attestation?.signature);
   assert.ok(teaserContent.x402_unlock_full_data.pay_to_wallet);
   assert.equal(teaserContent.x402_unlock_full_data.prepaid_30d_pass_price_usdc, "5.00");
   console.log("✅ 20. MCP Freemium Teaser Hook verified (HTTP 200 + 1-item preview + $5 Pass offer)");
+
+  // 21. Test /v1/compliance-check ($0.05 AML & OFAC Sanctions Screening)
+  const compRes = await fetch(`${base}/v1/compliance-check`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", chain: "base" }),
+  });
+  assert.equal(compRes.status, 200);
+  const compData = await compRes.json();
+  assert.equal(compData.ok, true);
+  assert.ok(compData.data.compliance_status);
+  assert.equal(typeof compData.data.safe_to_transact, "boolean");
+  console.log(
+    `✅ 21. /v1/compliance-check ($0.05 AML/Sanctions) verified (Status: ${compData.data.compliance_status}, Risk Score: ${compData.data.aml_risk_score_100}/100)`
+  );
+
+  // 22. Test /v1/defi-swap-quote ($0.05 Executable DeFi Swap & Calldata Builder)
+  const swapRes = await fetch(`${base}/v1/defi-swap-quote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({
+      from_chain: "base",
+      to_chain: "base",
+      from_token: "USDC",
+      to_token: "WETH",
+      amount: "10",
+    }),
+  });
+  assert.equal(swapRes.status, 200);
+  const swapData = await swapRes.json();
+  assert.equal(swapData.ok, true);
+  assert.ok(swapData.data.to_token.estimated_amount_human > 0);
+  assert.ok(swapData.data.transaction_request.to);
+  console.log(
+    `✅ 22. /v1/defi-swap-quote ($0.05 Executable Swap Calldata) verified (10 USDC -> ${swapData.data.to_token.estimated_amount_human} ${swapData.data.to_token.symbol} via ${swapData.data.aggregator})`
+  );
+
+  // 23. Test /v1/stats & /stats live telemetry endpoints
+  const statsRes = await fetch(`${base}/v1/stats`);
+  assert.equal(statsRes.status, 200);
+  const statsData = await statsRes.json();
+  assert.equal(statsData.version, "2.5.0");
+  assert.ok(statsData.funnel_telemetry.total_requests > 0);
+  console.log(
+    `✅ 23. /v1/stats live telemetry verified (Total requests tracked: ${statsData.funnel_telemetry.total_requests}, Wallet Base USDC: $${statsData.onchain_wallet.base_usdc_balance})`
+  );
 } finally {
   server.close();
 }

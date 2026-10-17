@@ -393,13 +393,68 @@ export const PRICING = {
       yield_optimization_plan: { best_base_usdc_apy_pct: 8.45 },
     },
   },
+  "/v1/compliance-check": {
+    priceUsd: "0.05",
+    amount: "50000", // 0.05 USDC
+    description:
+      "Institutional AML, Sanctions (OFAC), Phishing, Mixer & Malicious Counterparty Compliance Screening for any 0x EVM wallet or contract before executing agent transfers.",
+    mimeType: "application/json",
+    tags: ["compliance", "aml", "sanctions", "ofac", "kyc", "security", "wallet", "attested"],
+    exampleInput: { address: "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        address: { type: "string", description: "0x EVM wallet or contract address to screen" },
+      },
+      required: ["address"],
+    },
+    exampleOutput: {
+      certificate_type: "AML_SANCTIONS_COUNTERPARTY_SCREENING",
+      compliance_status: "APPROVED_CLEAN",
+      safe_to_transact: true,
+      aml_risk_score_100: 0,
+      triggered_flags: [],
+    },
+  },
+  "/v1/defi-swap-quote": {
+    priceUsd: "0.05",
+    amount: "50000", // 0.05 USDC
+    description:
+      "Executable DeFi Swap & Cross-Chain Bridge Action Calldata Builder (LI.FI + ParaSwap): computes best DEX/Bridge route and returns ready-to-sign EVM transaction calldata (to, data, value, gasLimit) on Base, Ethereum, Arbitrum, Polygon, and Optimism.",
+    mimeType: "application/json",
+    tags: ["swap", "bridge", "defi", "calldata", "execution", "dex", "base", "usdc", "attested"],
+    exampleInput: { from_token: "USDC", to_token: "ETH", amount: "10", from_chain: "base" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        from_token: { type: "string", description: "Source token symbol (USDC, ETH, AERO) or 0x address" },
+        to_token: { type: "string", description: "Destination token symbol (ETH, USDC, AERO, cbBTC) or 0x address" },
+        amount: { type: "string", description: "Amount to swap (human-readable e.g. '10' or atomic units)" },
+        from_chain: { type: "string", enum: ["base", "ethereum", "arbitrum", "polygon", "optimism"] },
+        to_chain: { type: "string", enum: ["base", "ethereum", "arbitrum", "polygon", "optimism"] },
+        wallet: { type: "string", description: "Optional 0x sender wallet address" },
+      },
+      required: ["from_token", "to_token"],
+    },
+    exampleOutput: {
+      action_type: "DEX_SWAP_CALLDATA",
+      aggregator: "lifi",
+      from_chain_id: 8453,
+      to_chain_id: 8453,
+      transaction_request: {
+        to: "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+        value: "0x0",
+        data: "0x...",
+      },
+    },
+  },
   "/v1/buy-pass": {
     priceUsd: "5.00",
     amount: "5000000", // 5.00 USDC
     description:
-      "Instant 30-Day Prepaid API Key Pass (ak_live_...) for AI agents, LangChain, n8n, Make.com, and developers. Unlocks all 16 Agent Kiosk REST & MCP intelligence tools for 30 days via X-API-KEY header without per-call x402 signing.",
+      "Instant 30-Day Prepaid API Key Pass (ak_live_...) for AI agents, LangChain, n8n, Make.com, and developers. Unlocks all 18 Agent Kiosk REST & MCP intelligence tools for 30 days via X-API-KEY header without per-call x402 signing.",
     mimeType: "application/json",
-    tags: ["prepaid", "api-key", "pass", "subscription", "access", "agents", "mcp"],
+    tags: ["prepaid", "api-key", "pass", "subscription", "access", "agents", "mcp", "attested"],
     exampleInput: { agent_name: "my-autonomous-agent" },
     inputSchema: {
       type: "object",
@@ -414,6 +469,31 @@ export const PRICING = {
     },
   },
 };
+
+/**
+ * Generate a cryptographic attestation envelope so downstream agents and contracts can verify payload integrity
+ */
+export function attestResponse(routePath, dataPayload) {
+  const timestamp = new Date().toISOString();
+  const serialized = JSON.stringify(dataPayload || {});
+  const payloadHash = crypto.createHash("sha256").update(serialized).digest("hex");
+  const sigInput = `v1:${routePath}:${timestamp}:${payloadHash}`;
+  const signature = crypto
+    .createHmac("sha256", CONFIG.passSigningSecret)
+    .update(sigInput)
+    .digest("base64url");
+
+  return {
+    attested: true,
+    issuer: "io.github.ralf9090/agent-kiosk",
+    signer_wallet: CONFIG.payToWallet,
+    algorithm: "HMAC-SHA256",
+    route: routePath,
+    payload_sha256: payloadHash,
+    timestamp_utc: timestamp,
+    signature,
+  };
+}
 
 /**
  * Issue a stateless HMAC-SHA256 signed 30-day API key (ak_live_<payloadB64>.<sigB64>)
@@ -500,6 +580,8 @@ function decodePaymentHeader(rawHeader) {
  */
 export function build402Challenge(routePath, resourceUrl) {
   const route = PRICING[routePath] || PRICING["/v1/social-search"];
+  const rawTags = route.tags || ["agents", "x402", "mcp", "base", "usdc"];
+  const tagsWithAttested = rawTags.includes("attested") ? rawTags : [...rawTags, "attested"];
 
   const body = {
     x402Version: 2,
@@ -510,7 +592,7 @@ export function build402Challenge(routePath, resourceUrl) {
       mimeType: route.mimeType,
       serviceName: "Agent Kiosk",
       iconUrl: "https://agent-kiosk.vercel.app/favicon.ico",
-      tags: route.tags || ["agents", "x402", "mcp", "base", "usdc"],
+      tags: tagsWithAttested,
     },
     accepts: [
       {

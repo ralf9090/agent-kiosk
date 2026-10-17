@@ -21,6 +21,8 @@ import {
   tokenDueDiligence,
   b2bCompanyDossier,
   whaleAlphaRadar,
+  complianceCheck,
+  defiSwapQuote,
 } from "./providers.js";
 
 const HANDLERS = {
@@ -36,6 +38,8 @@ const HANDLERS = {
   prediction_markets: predictionMarkets,
   defi_yields: defiYields,
   github_intel: githubIntel,
+  compliance_check: complianceCheck,
+  defi_swap_quote: defiSwapQuote,
   token_due_diligence: tokenDueDiligence,
   b2b_company_dossier: b2bCompanyDossier,
   whale_alpha_radar: whaleAlphaRadar,
@@ -52,7 +56,7 @@ const HANDLERS = {
     verified: false,
     payment_mode: "stdio-preview",
     service: "Agent Kiosk",
-    version: "2.4.1",
+    version: "2.5.0",
     protocol: "x402 v2 & v1 + MCP",
     network: CONFIG.network,
     asset: "USDC",
@@ -74,6 +78,8 @@ const TOOL_TO_ROUTE = {
   prediction_markets: "/v1/prediction-markets",
   defi_yields: "/v1/defi-yields",
   github_intel: "/v1/github-intel",
+  compliance_check: "/v1/compliance-check",
+  defi_swap_quote: "/v1/defi-swap-quote",
   token_due_diligence: "/v1/token-due-diligence",
   b2b_company_dossier: "/v1/b2b-company-dossier",
   whale_alpha_radar: "/v1/whale-alpha-radar",
@@ -111,7 +117,7 @@ rl.on("line", async (line) => {
         result: {
           protocolVersion: negotiatedVersion,
           capabilities: { tools: {}, resources: {}, prompts: {} },
-          serverInfo: { name: "agent-kiosk", version: "2.4.1" },
+          serverInfo: { name: "agent-kiosk", version: "2.5.0" },
         },
       });
     }
