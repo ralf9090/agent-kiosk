@@ -331,13 +331,27 @@ export const MCP_TOOLS = [
   {
     name: "buy_prepaid_pass",
     description:
-      "Mint a 30-Day Prepaid API Key Pass (ak_live_...) for $5.00 USDC on Base via x402. Unlocks all 15 Agent Kiosk REST & MCP intelligence tools for 30 days via the X-API-KEY header without per-call x402 signing (ideal for LangChain, n8n, Make.com, OpenAI Actions, and Python/JS bots).",
+      "Mint a 30-Day Prepaid API Key Pass (ak_live_...) for $5.00 USDC on Base via x402. Unlocks all 16 Agent Kiosk REST & MCP intelligence tools for 30 days via the X-API-KEY header without per-call x402 signing (ideal for LangChain, n8n, Make.com, OpenAI Actions, and Python/JS bots).",
     inputSchema: {
       type: "object",
       properties: {
         agent_name: {
           type: "string",
           description: "Optional identifier or name for your agent/workflow",
+        },
+      },
+    },
+  },
+  {
+    name: "x402_ping",
+    description:
+      "Ultra-low-cost ($0.001 USDC) x402 v2 & v1 wallet verification ping, payment settlement test, latency check, and round-trip echo endpoint on Base Mainnet.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: {
+          type: "string",
+          description: "Optional message string to echo back upon verified settlement",
         },
       },
     },
@@ -355,6 +369,30 @@ export const MCP_TOOLS = [
     openWorldHint: true,
   },
 }));
+
+async function pingHandler(params = {}, auth = null) {
+  const echoMsg = String(params.message || params.ping || params.q || "hello-x402").trim();
+  return {
+    status: "pong",
+    verified: Boolean(auth && auth.authorized),
+    payment_mode: auth?.mode || "preview",
+    service: "Agent Kiosk",
+    version: "2.4.1",
+    protocol: "x402 v2 & v1 + MCP",
+    network: CONFIG.network,
+    asset: "USDC",
+    echo: echoMsg,
+    payer: auth?.payer || null,
+    tx_hash: auth?.txHash || null,
+    server_time_utc: new Date().toISOString(),
+    catalog_summary: {
+      total_endpoints: 17,
+      core_tools_usdc: "0.01 - 0.03",
+      mega_combo_dossiers_usdc: "0.10 (/v1/token-due-diligence, /v1/b2b-company-dossier, /v1/whale-alpha-radar)",
+      prepaid_30d_pass_usdc: "5.00 (/v1/buy-pass)",
+    },
+  };
+}
 
 async function buyPassHandler(params = {}, auth = null) {
   if (!auth || !auth.authorized) {
@@ -393,6 +431,7 @@ function cachedProvider(name, fn, ttlMs = 45_000) {
 }
 
 const ROUTE_HANDLERS = {
+  "/v1/ping": pingHandler,
   "/v1/social-search": cachedProvider("social", socialSearch, 45_000),
   "/v1/maps-leads": cachedProvider("maps", mapsLeads, 120_000),
   "/v1/web-extract": cachedProvider("web", webExtract, 90_000),
@@ -412,6 +451,7 @@ const ROUTE_HANDLERS = {
 };
 
 const TOOL_TO_ROUTE = {
+  x402_ping: "/v1/ping",
   social_search: "/v1/social-search",
   maps_leads: "/v1/maps-leads",
   web_extract: "/v1/web-extract",
@@ -505,15 +545,15 @@ export function createAppServer() {
     if (req.method === "GET" && pathname === "/llms.txt") {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
       const lines = [
-        "# Agent Kiosk — 12-in-1 Autonomous B2A Data, Market Alpha & Security Supermarket (x402 v2 & MCP)",
+        "# Agent Kiosk — 17-in-1 Autonomous B2A Data, Market Alpha & Security Supermarket (x402 v2 & MCP)",
         "",
-        "> No sign-up, no monthly subscription. Autonomous AI agents can query 12 specialized intelligence tools using HTTP x402 v2 (Base USDC) or Model Context Protocol (MCP).",
+        "> No sign-up, no monthly subscription. Autonomous AI agents can query 17 specialized intelligence tools (including $0.001 wallet ping, 12 core APIs, 3 $0.10 360-dossiers, and $5.00 30-day VIP API Pass) using HTTP x402 v2 (Base USDC) or Model Context Protocol (MCP).",
         "",
         "## Endpoints",
         ...Object.entries(PRICING).map(
           ([route, info]) => `- POST ${baseUrl}${route} ($${info.priceUsd} USDC): ${info.description}`
         ),
-        `- POST ${baseUrl}/mcp : Model Context Protocol (JSON-RPC 2.0) server endpoint (12 tools).`,
+        `- POST ${baseUrl}/mcp : Model Context Protocol (JSON-RPC 2.0) server endpoint (${MCP_TOOLS.length} tools).`,
         `- GET ${baseUrl}/llms-full.txt : Full LLM tool schemas & integration reference.`,
         `- GET ${baseUrl}/openapi.json : OpenAPI 3.1 specification.`,
       ];
@@ -538,7 +578,7 @@ export function createAppServer() {
           `Official MCP Registry ID: io.github.ralf9090/agent-kiosk`,
           `x402scan Server ID: a1af2789-615a-4324-b3f1-83b97834ece8`,
           "",
-          "## Available Tools (12)",
+          `## Available Tools (${MCP_TOOLS.length})`,
           "",
           ...blocks,
         ].join("\n\n")
@@ -556,10 +596,10 @@ export function createAppServer() {
       return sendJson(res, 200, {
         mcpVersion: "2024-11-05",
         name: "io.github.ralf9090/agent-kiosk",
-        title: "Agent Kiosk — 12-in-1 B2A Intelligence & x402 API",
-        version: "2.3.0",
+        title: "Agent Kiosk — 17-in-1 B2A Intelligence & x402 API",
+        version: "2.4.1",
         description:
-          "12-in-1 autonomous intelligence MCP server & x402 API: DeFi order-flow alpha, whale wallet profiler, smart contract security audit, prediction markets, DeFi yields, B2B leads & research.",
+          "17-in-1 autonomous intelligence MCP server & x402 API: Token Due Diligence, B2B Company Dossier, Whale Alpha Radar, DeFi order-flow alpha, smart contract security audit, prediction markets, DeFi yields, B2B leads, research, and 30-day Prepaid API Pass.",
         endpoints: {
           streamableHttp: `${baseUrl}/mcp`,
           smithery: "https://agent-kiosk--batuhansenavci.run.tools",
@@ -574,9 +614,9 @@ export function createAppServer() {
         name_for_human: "Agent Kiosk",
         name_for_model: "agent_kiosk",
         description_for_human:
-          "12-in-1 B2A Intelligence API & MCP Server: DeFi Alpha, Whale Wallet Profiler, Security Audits, B2B Leads & Research.",
+          "17-in-1 B2A Intelligence API & MCP Server: Token Verdicts, B2B Dossiers, Whale Portfolio Radar, Security Audits & Research.",
         description_for_model:
-          "Query live social discussions, local business leads with phone/email, clean web markdown with prompt-injection scanning, 0x token/contract honeypot audits, DEX buy/sell order-flow alpha, multi-chain whale wallet balances, prediction market odds, DeFi yields, domain DNS/SaaS intelligence, package CVE checks, academic papers, and GitHub repo stats.",
+          "Query live social discussions, local business leads with phone/email, clean web markdown with prompt-injection scanning, 0x token/contract honeypot audits, DEX buy/sell order-flow alpha, multi-chain whale wallet balances, prediction market odds, DeFi yields, domain DNS/SaaS intelligence, package CVE checks, academic papers, GitHub repo stats, 360-degree token/company/whale dossiers, and 30-day prepaid API passes.",
         auth: { type: "none" },
         api: { type: "openapi", url: `${baseUrl}/openapi.json` },
         logo_url: `${baseUrl}/favicon.ico`,
@@ -585,7 +625,7 @@ export function createAppServer() {
       });
     }
 
-    // 2. OpenAPI 3.1 Spec with full input & output schemas for all 12 endpoints
+    // 2. OpenAPI 3.1 Spec with full input & output schemas for all 17 endpoints
     if (req.method === "GET" && pathname === "/openapi.json") {
       const openApiPaths = {};
       for (const tool of MCP_TOOLS) {
@@ -595,6 +635,7 @@ export function createAppServer() {
           post: {
             operationId: tool.name,
             summary: priceInfo.description,
+            tags: priceInfo.tags || ["agents", "x402"],
             "x-payment-info": {
               protocols: [{ x402: {} }],
               price: { mode: "fixed", currency: "USD", amount: priceInfo.priceUsd },
@@ -615,9 +656,9 @@ export function createAppServer() {
         openapi: "3.1.0",
         info: {
           title: "Agent Kiosk B2A API",
-          version: "2.3.0",
+          version: "2.4.1",
           description:
-            "12-in-1 Pay-Per-Call Intelligence Supermarket for AI Agents: Social Search, Business Leads, Clean Web Extraction, Smart Contract Security, DeFi Order-Flow Alpha, Whale Wallet Profiler, Prediction Markets, DeFi Yields, Domain Intelligence, Package CVE Audits, Academic Research, and GitHub Intelligence via x402 v2 (Base USDC) and MCP.",
+            "17-in-1 Pay-Per-Call Intelligence Supermarket for AI Agents: Token 360 Due Diligence, B2B Company Dossier, Whale Alpha Radar, Social Search, Business Leads, Clean Web Extraction, Smart Contract Security, DeFi Order-Flow Alpha, Whale Wallet Profiler, Prediction Markets, DeFi Yields, Domain Intelligence, Package CVE Audits, Academic Research, GitHub Intelligence, 30-Day Prepaid Pass, and x402 Ping via x402 v2 (Base USDC) and MCP.",
           contact: {
             name: "Agent Kiosk Support",
             email: "ralf9090@users.noreply.github.com",
@@ -631,7 +672,7 @@ export function createAppServer() {
       });
     }
 
-    // 2b. SEO & AI Crawler Indexing: /robots.txt & /sitemap.xml (16 URLs)
+    // 2b. SEO & AI Crawler Indexing: /robots.txt & /sitemap.xml (17 URLs)
     if (req.method === "GET" && pathname === "/robots.txt") {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
       return res.end(`User-agent: *\nAllow: /\nSitemap: ${baseUrl}/sitemap.xml\n`);
@@ -693,7 +734,7 @@ export function createAppServer() {
   </style>
 </head>
 <body>
-  <p><a href="/">← Back to Agent Kiosk (All 12 Tools)</a></p>
+  <p><a href="/">← Back to Agent Kiosk (All ${MCP_TOOLS.length} Tools)</a></p>
   <h1>⚡ <code>${tool.name}</code> — x402 v2 & MCP Tool</h1>
   <p>${tool.description}</p>
   <ul>
@@ -727,8 +768,8 @@ export function createAppServer() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agent Kiosk — 12-in-1 x402 v2 & MCP Intelligence API for AI Agents</title>
-  <meta name="description" content="Instant pay-per-call B2A data, DeFi order-flow alpha, whale wallet profiler, prediction markets, security audits, and B2B leads via x402 (Base USDC) and MCP." />
+  <title>Agent Kiosk — 17-in-1 x402 v2 & MCP Intelligence API for AI Agents</title>
+  <meta name="description" content="Instant pay-per-call B2A data, Token 360 Due Diligence, B2B Dossiers, Whale Portfolio Radar, DeFi order-flow alpha, security audits, and B2B leads via x402 (Base USDC) and MCP." />
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b0f19; color:#e2e8f0; max-width:1040px; margin:0 auto; padding:32px 20px; line-height:1.6; }
     h1, h2 { color:#fff; }
@@ -741,17 +782,17 @@ export function createAppServer() {
   </style>
 </head>
 <body>
-  <h1>⚡ Agent Kiosk — 12-in-1 Autonomous B2A Intelligence Supermarket</h1>
+  <h1>⚡ Agent Kiosk — 17-in-1 Autonomous B2A Intelligence Supermarket</h1>
   <p>No API keys, no sign-ups, no monthly subscriptions. Built for autonomous AI agents paying per request via <strong>x402 v2 (Base USDC)</strong> or connecting via <strong>Model Context Protocol (MCP)</strong>.</p>
   <div class="badges">
-    <a href="https://www.x402scan.com/server/a1af2789-615a-4324-b3f1-83b97834ece8">🔵 x402scan (12/12 Verified)</a>
+    <a href="https://www.x402scan.com/server/a1af2789-615a-4324-b3f1-83b97834ece8">🔵 x402scan (17/17 Verified)</a>
     <a href="https://smithery.ai/servers/batuhansenavci/agent-kiosk">🟠 Smithery.ai</a>
     <a href="https://registry.modelcontextprotocol.io/v0/servers?search=agent-kiosk">🟣 Official MCP Registry</a>
     <a href="/openapi.json">📄 OpenAPI 3.1</a>
     <a href="/llms-full.txt">🤖 /llms-full.txt</a>
     <a href="/.well-known/x402.json">⚡ /.well-known/x402.json</a>
   </div>
-  <h2>12 Live Endpoints & MCP Tools (Base Mainnet USDC)</h2>
+  <h2>17 Live Endpoints & MCP Tools (Base Mainnet USDC)</h2>
   <table>
     <thead><tr><th>MCP Tool</th><th>x402 Endpoint</th><th>Price</th><th>Description</th></tr></thead>
     <tbody>${toolRows}</tbody>
@@ -777,10 +818,10 @@ export function createAppServer() {
     ) {
       return sendJson(res, 200, {
         name: "Agent Kiosk",
-        version: "2.3.0",
+        version: "2.4.1",
         x402Version: 2,
         description:
-          "12-in-1 Autonomous B2A Data, Market Alpha & Security Supermarket via x402 v2 (Base USDC) and MCP.",
+          "17-in-1 Autonomous B2A Data, Market Alpha & Security Supermarket via x402 v2 (Base USDC) and MCP.",
         protocols: ["x402", "mcp", "rest"],
         payment: {
           network: CONFIG.network,
@@ -796,7 +837,7 @@ export function createAppServer() {
       });
     }
 
-    // 4. Paid x402 v2/v1 Endpoints (all 16 routes)
+    // 4. Paid x402 v2/v1 Endpoints (all 17 routes)
     if ((req.method === "POST" || req.method === "GET") && ROUTE_HANDLERS[pathname]) {
       const resourceUrl = `${baseUrl}${pathname}`;
       const auth = await verifyAndSettlePayment(req, pathname, resourceUrl);
@@ -841,7 +882,7 @@ export function createAppServer() {
     if (req.method === "GET" && pathname === "/mcp") {
       return sendJson(res, 200, {
         name: "agent-kiosk",
-        version: "2.4.0",
+        version: "2.4.1",
         protocol: "mcp-streamable-http",
         protocolVersion: "2024-11-05",
         endpoint: `${baseUrl}/mcp`,
@@ -869,7 +910,7 @@ export function createAppServer() {
             result: {
               protocolVersion: negotiatedVersion,
               capabilities: { tools: {}, resources: {}, prompts: {} },
-              serverInfo: { name: "agent-kiosk", version: "2.4.0" },
+              serverInfo: { name: "agent-kiosk", version: "2.4.1" },
             },
           });
         }

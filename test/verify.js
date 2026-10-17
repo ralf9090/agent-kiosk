@@ -16,7 +16,7 @@ try {
   assert.equal(discRes.status, 200);
   const disc = await discRes.json();
   assert.equal(disc.x402Version, 2);
-  assert.equal(disc.resources.length, 16);
+  assert.equal(disc.resources.length, 17);
 
   const favRes = await fetch(`${base}/favicon.ico`);
   assert.equal(favRes.status, 200);
@@ -25,18 +25,34 @@ try {
   assert.equal(openApiRes.status, 200);
   const openApi = await openApiRes.json();
   assert.ok(openApi.info.contact.email);
-  assert.equal(Object.keys(openApi.paths).length, 16);
-  console.log("✅ 1. Discovery manifest, /openapi.json (16 paths), and /favicon.ico verified");
+  assert.equal(Object.keys(openApi.paths).length, 17);
+  console.log("✅ 1. Discovery manifest, /openapi.json (17 paths), and /favicon.ico verified");
 
-  // 2. Test unauthenticated REST request returns HTTP 402 with x402Version 2 and PAYMENT-REQUIRED header
+  // 2. Test unauthenticated REST request returns HTTP 402 with x402Version 2, PAYMENT-REQUIRED header, and full Coinbase Bazaar schema
   const unpaidRes = await fetch(`${base}/v1/wallet-profiler`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ address: "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95" }),
   });
   assert.equal(unpaidRes.status, 402);
-  assert.ok(unpaidRes.headers.get("payment-required"));
-  console.log("✅ 2. HTTP 402 v2 Payment Required verified across endpoints");
+  const prHeader = unpaidRes.headers.get("payment-required");
+  assert.ok(prHeader);
+  const decodedChallenge = JSON.parse(Buffer.from(prHeader, "base64").toString("utf8"));
+  assert.equal(decodedChallenge.resource.serviceName, "Agent Kiosk");
+  assert.ok(Array.isArray(decodedChallenge.resource.tags));
+  assert.equal(decodedChallenge.extensions.bazaar.info.input.discoverable, true);
+
+  // Also test authorized /v1/ping ($0.001 USDC)
+  const pingRes = await fetch(`${base}/v1/ping`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ message: "bazaar-ready" }),
+  });
+  assert.equal(pingRes.status, 200);
+  const pingData = await pingRes.json();
+  assert.equal(pingData.data.status, "pong");
+  assert.equal(pingData.data.echo, "bazaar-ready");
+  console.log("✅ 2. HTTP 402 v2 + Coinbase Bazaar extensions.bazaar schema + /v1/ping ($0.001) verified");
 
   // 3. Test authorized /v1/social-search
   const socialRes = await fetch(`${base}/v1/social-search`, {
@@ -274,7 +290,7 @@ try {
     `✅ 18. /v1/buy-pass ($5.00 Prepaid Pass) & Smart Cache verified (Cache response in ${elapsedMs}ms)`
   );
 
-  // 19. Test MCP JSON-RPC tools/list returns all 16 tools
+  // 19. Test MCP JSON-RPC tools/list returns all 17 tools
   const mcpRes = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -282,8 +298,8 @@ try {
   });
   assert.equal(mcpRes.status, 200);
   const mcpData = await mcpRes.json();
-  assert.equal(mcpData.result.tools.length, 16);
-  console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 16 tools");
+  assert.equal(mcpData.result.tools.length, 17);
+  console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 17 tools");
 
   // 20. Test unpaid MCP tools/call returns HTTP 200 Freemium Teaser Preview + x402 unlock hook
   const mcpCallRes = await fetch(`${base}/mcp`, {

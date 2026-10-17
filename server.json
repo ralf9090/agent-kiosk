@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ralf9090/agent-kiosk",
-  "title": "Agent Kiosk — 16-in-1 B2A Intelligence & x402 API",
-  "description": "16-in-1 intelligence MCP server: DeFi alpha, whale profiler, security audit, B2B leads & research.",
-  "version": "2.4.0",
+  "title": "Agent Kiosk — 17-in-1 B2A Intelligence & x402 API",
+  "description": "17-in-1 intelligence MCP server: Token verdicts, B2B dossiers, whale radar, security & research.",
+  "version": "2.4.1",
   "websiteUrl": "https://agent-kiosk.vercel.app",
   "repository": {
     "url": "https://github.com/ralf9090/agent-kiosk",

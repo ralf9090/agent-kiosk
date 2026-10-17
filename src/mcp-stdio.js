@@ -47,9 +47,21 @@ const HANDLERS = {
     api_key:
       "[LOCKED — Send POST https://agent-kiosk.vercel.app/v1/buy-pass with $5.00 USDC x402 payment on Base to mint your live 30-day ak_live_... API key]",
   }),
+  x402_ping: async (params = {}) => ({
+    status: "pong",
+    verified: false,
+    payment_mode: "stdio-preview",
+    service: "Agent Kiosk",
+    version: "2.4.1",
+    protocol: "x402 v2 & v1 + MCP",
+    network: CONFIG.network,
+    asset: "USDC",
+    echo: String(params.message || "hello-x402"),
+  }),
 };
 
 const TOOL_TO_ROUTE = {
+  x402_ping: "/v1/ping",
   social_search: "/v1/social-search",
   maps_leads: "/v1/maps-leads",
   web_extract: "/v1/web-extract",
@@ -99,7 +111,7 @@ rl.on("line", async (line) => {
         result: {
           protocolVersion: negotiatedVersion,
           capabilities: { tools: {}, resources: {}, prompts: {} },
-          serverInfo: { name: "agent-kiosk", version: "2.3.1" },
+          serverInfo: { name: "agent-kiosk", version: "2.4.1" },
         },
       });
     }

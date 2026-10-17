@@ -29,12 +29,52 @@ export const CONFIG = {
 };
 
 export const PRICING = {
+  "/v1/ping": {
+    priceUsd: "0.001",
+    amount: "1000", // 0.001 USDC
+    description:
+      "Ultra-low-cost ($0.001 USDC) x402 v2 & v1 payment verification, wallet readiness ping, latency check, and echo test on Base Mainnet.",
+    mimeType: "application/json",
+    tags: ["ping", "health", "test", "verify", "status", "echo", "x402", "agents"],
+    exampleInput: { message: "hello-x402" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "Optional echo string to verify round-trip payload" },
+      },
+    },
+    exampleOutput: {
+      status: "pong",
+      verified: true,
+      service: "Agent Kiosk",
+      network: "eip155:8453",
+      asset: "USDC",
+      echo: "hello-x402",
+    },
+  },
   "/v1/social-search": {
     priceUsd: "0.02",
     amount: "20000", // 0.02 USDC
     description:
       "Real-time social media search (Reddit, HackerNews) returning clean JSON & Markdown for AI agents.",
     mimeType: "application/json",
+    tags: ["social", "search", "reddit", "hackernews", "sentiment", "trends", "scraping"],
+    exampleInput: { query: "autonomous AI agents", platform: "all", limit: 5 },
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search keywords or topic" },
+        platform: { type: "string", enum: ["all", "reddit", "hn"] },
+        limit: { type: "number" },
+      },
+      required: ["query"],
+    },
+    exampleOutput: {
+      query: "autonomous AI agents",
+      platform: "all",
+      count: 5,
+      items: [{ source: "hackernews", title: "Show HN: Autonomous x402 Agents", score: 245 }],
+    },
   },
   "/v1/maps-leads": {
     priceUsd: "0.03",
@@ -42,6 +82,23 @@ export const PRICING = {
     description:
       "Local business lead extractor returning company name, phone, website, address, and coordinates.",
     mimeType: "application/json",
+    tags: ["leads", "b2b", "maps", "local-business", "contacts", "phone", "enrichment"],
+    exampleInput: { query: "dentist", location: "San Francisco", limit: 5 },
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Business category or name" },
+        location: { type: "string", description: "City or region" },
+        limit: { type: "number" },
+      },
+      required: ["query"],
+    },
+    exampleOutput: {
+      query: "dentist",
+      location: "San Francisco",
+      count: 5,
+      leads: [{ name: "SF Dental Studio", phone: "+1-415-555-0199", website: "https://sfdental.example.com" }],
+    },
   },
   "/v1/web-extract": {
     priceUsd: "0.01",
@@ -49,6 +106,22 @@ export const PRICING = {
     description:
       "Clean webpage-to-Markdown extractor with automatic Prompt Injection trap scanning for AI agents.",
     mimeType: "application/json",
+    tags: ["web", "scraper", "markdown", "extract", "crawler", "prompt-injection", "security"],
+    exampleInput: { url: "https://example.com", max_length: 8000 },
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Target webpage URL (https://...)" },
+        max_length: { type: "number" },
+      },
+      required: ["url"],
+    },
+    exampleOutput: {
+      url: "https://example.com",
+      title: "Example Domain",
+      prompt_injection_scan: { safe: true, risk_level: "LOW" },
+      llm_markdown: "# Example Domain\nThis domain is for use in illustrative examples...",
+    },
   },
   "/v1/security-audit": {
     priceUsd: "0.02",
@@ -56,6 +129,23 @@ export const PRICING = {
     description:
       "Pre-flight security scanner for 0x smart contracts/tokens (honeypot, tax, liquidity via GoPlus & DexScreener) and URLs (phishing & prompt injection).",
     mimeType: "application/json",
+    tags: ["security", "audit", "honeypot", "smart-contract", "token", "goplus", "phishing"],
+    exampleInput: { target: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", chain: "base" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "0x contract address or https:// URL" },
+        chain: { type: "string", enum: ["base", "ethereum", "bsc", "arbitrum", "polygon", "optimism"] },
+      },
+      required: ["target"],
+    },
+    exampleOutput: {
+      target_type: "smart_contract",
+      chain: "base",
+      verdict: "SAFE",
+      risk_score: 0,
+      honeypot_check: { is_honeypot: false, buy_tax_pct: 0, sell_tax_pct: 0 },
+    },
   },
   "/v1/token-alpha": {
     priceUsd: "0.02",
@@ -63,6 +153,22 @@ export const PRICING = {
     description:
       "Real-time DEX order-flow & token alpha signal analyzer: buy vs. sell pressure, liquidity depth, volume velocity, and top pools.",
     mimeType: "application/json",
+    tags: ["crypto", "defi", "token", "alpha", "dex", "order-flow", "signals", "base"],
+    exampleInput: { query: "AERO", chain: "base" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Token symbol or 0x contract address" },
+        chain: { type: "string" },
+      },
+      required: ["query"],
+    },
+    exampleOutput: {
+      query: "AERO",
+      signal: "BULLISH_ACCUMULATION",
+      buy_pressure_24h_pct: 58.4,
+      total_liquidity_usd: 42500000,
+    },
   },
   "/v1/domain-intel": {
     priceUsd: "0.02",
@@ -70,6 +176,20 @@ export const PRICING = {
     description:
       "B2B company & domain intelligence: DNS records, MX email provider, SaaS tech stack fingerprints from TXT/NS, RDAP registration, and active subdomains.",
     mimeType: "application/json",
+    tags: ["domain", "dns", "b2b", "enrichment", "tech-stack", "whois", "osint"],
+    exampleInput: { domain: "stripe.com" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        domain: { type: "string", description: "Target company domain (e.g. stripe.com)" },
+      },
+      required: ["domain"],
+    },
+    exampleOutput: {
+      domain: "stripe.com",
+      email_provider: "Google Workspace",
+      detected_tech_stack: ["Google Cloud", "SPF Configured", "DMARC Enforced"],
+    },
   },
   "/v1/package-audit": {
     priceUsd: "0.01",
@@ -77,6 +197,24 @@ export const PRICING = {
     description:
       "Open-source package & CVE vulnerability scanner for coding agents (npm, PyPI, crates.io) powered by Google OSV.dev.",
     mimeType: "application/json",
+    tags: ["security", "cve", "npm", "pypi", "rust", "package", "vulnerability", "coding"],
+    exampleInput: { name: "express", ecosystem: "npm" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Package name" },
+        ecosystem: { type: "string", enum: ["npm", "pypi", "crates.io"] },
+        version: { type: "string" },
+      },
+      required: ["name"],
+    },
+    exampleOutput: {
+      package: "express",
+      ecosystem: "npm",
+      latest_version: "5.1.0",
+      verdict: "CLEAN",
+      vulnerability_count: 0,
+    },
   },
   "/v1/academic-search": {
     priceUsd: "0.02",
@@ -84,6 +222,21 @@ export const PRICING = {
     description:
       "Peer-reviewed scientific paper & preprint search (OpenAlex + arXiv) returning citations, reconstructed abstracts, and direct Open-Access PDF links.",
     mimeType: "application/json",
+    tags: ["research", "academic", "arxiv", "papers", "science", "citations", "pdf"],
+    exampleInput: { query: "autonomous AI agents", limit: 5 },
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Scientific topic or paper query" },
+        limit: { type: "number" },
+      },
+      required: ["query"],
+    },
+    exampleOutput: {
+      query: "autonomous AI agents",
+      count: 5,
+      papers: [{ title: "Autonomous LLM Agents in Decentralized Markets", citations: 142 }],
+    },
   },
   "/v1/wallet-profiler": {
     priceUsd: "0.03",
@@ -91,6 +244,20 @@ export const PRICING = {
     description:
       "Multi-chain whale & wallet portfolio profiler across Base, Ethereum, Arbitrum, and Polygon: live USDC & ETH balances, transaction counts, and smart contract detection.",
     mimeType: "application/json",
+    tags: ["wallet", "whale", "portfolio", "onchain", "base", "ethereum", "usdc", "profiler"],
+    exampleInput: { address: "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        address: { type: "string", description: "0x EVM wallet address" },
+      },
+      required: ["address"],
+    },
+    exampleOutput: {
+      address: "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95",
+      wallet_tier: "ACTIVE_TRADER",
+      summary: { total_usdc_balance: 1250.5, total_native_eth_equivalent: 0.42 },
+    },
   },
   "/v1/prediction-markets": {
     priceUsd: "0.02",
@@ -98,6 +265,21 @@ export const PRICING = {
     description:
       "Live prediction market odds & implied event probabilities (%) from Polymarket and Manifold Markets for macro, crypto, tech, and politics.",
     mimeType: "application/json",
+    tags: ["polymarket", "prediction-markets", "odds", "forecasting", "macro", "crypto"],
+    exampleInput: { query: "bitcoin", limit: 5 },
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Event topic or keyword" },
+        limit: { type: "number" },
+      },
+      required: ["query"],
+    },
+    exampleOutput: {
+      query: "bitcoin",
+      count: 5,
+      markets: [{ question: "Will Bitcoin reach $150k?", implied_probability_pct: 64.2 }],
+    },
   },
   "/v1/defi-yields": {
     priceUsd: "0.02",
@@ -105,6 +287,21 @@ export const PRICING = {
     description:
       "DeFi highest APY & yield radar powered by DeFiLlama: ranks top liquidity and lending pools by APY and TVL for any token and chain.",
     mimeType: "application/json",
+    tags: ["defi", "yield", "apy", "lending", "usdc", "base", "defillama", "liquidity"],
+    exampleInput: { symbol: "USDC", chain: "Base", min_tvl_usd: 100000 },
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Token symbol (e.g. USDC, ETH)" },
+        chain: { type: "string", description: "Chain name (e.g. Base, Ethereum)" },
+        min_tvl_usd: { type: "number" },
+      },
+    },
+    exampleOutput: {
+      symbol_filter: "USDC",
+      chain_filter: "Base",
+      pools: [{ project: "moonwell-lending", symbol: "USDC", apy_total_pct: 8.45, tvl_usd: 48000000 }],
+    },
   },
   "/v1/github-intel": {
     priceUsd: "0.01",
@@ -112,6 +309,21 @@ export const PRICING = {
     description:
       "GitHub repository & open-source competitive intelligence: stars, forks, open issues, latest releases, and top repositories by topic.",
     mimeType: "application/json",
+    tags: ["github", "opensource", "developer", "repos", "analytics", "releases"],
+    exampleInput: { query: "modelcontextprotocol/servers" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "'owner/repo' or search topic" },
+        limit: { type: "number" },
+      },
+      required: ["query"],
+    },
+    exampleOutput: {
+      mode: "repository_detail",
+      full_name: "modelcontextprotocol/servers",
+      stars: 42000,
+    },
   },
   "/v1/token-due-diligence": {
     priceUsd: "0.10",
@@ -119,6 +331,23 @@ export const PRICING = {
     description:
       "Institutional 3-in-1 Token Due Diligence Report: combines GoPlus on-chain honeypot/tax security audit, DexScreener order-flow alpha & liquidity depth, and live Reddit/HN social sentiment into a composite investment grade (A-F).",
     mimeType: "application/json",
+    tags: ["token", "verdict", "due-diligence", "security", "alpha", "honeypot", "base", "agents"],
+    exampleInput: { query: "AERO", chain: "base" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Token symbol or 0x contract address on Base/EVM" },
+        chain: { type: "string", enum: ["base", "ethereum", "solana", "arbitrum", "bsc", "all"] },
+      },
+      required: ["query"],
+    },
+    exampleOutput: {
+      report_type: "TOKEN_360_DUE_DILIGENCE",
+      composite_score_100: 92,
+      investment_grade: "A",
+      verdict: "STRONG_FUNDAMENTALS_AND_SAFE_CONTRACT",
+      actionable_recommendation: "ACCUMULATE_OR_HOLD",
+    },
   },
   "/v1/b2b-company-dossier": {
     priceUsd: "0.10",
@@ -126,6 +355,22 @@ export const PRICING = {
     description:
       "Complete 4-in-1 B2B Sales & Competitive Intelligence Dossier: combines DNS/MX/SaaS tech stack infrastructure, clean website extraction, local business contact/phone leads, and social mentions.",
     mimeType: "application/json",
+    tags: ["b2b", "enrichment", "company-dossier", "leads", "sales", "domain", "research"],
+    exampleInput: { domain: "stripe.com", company: "Stripe", location: "San Francisco" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        domain: { type: "string", description: "Company domain (e.g. stripe.com)" },
+        company: { type: "string", description: "Company name" },
+        location: { type: "string", description: "HQ city" },
+      },
+      required: ["domain"],
+    },
+    exampleOutput: {
+      report_type: "B2B_COMPANY_360_DOSSIER",
+      domain: "stripe.com",
+      executive_summary: { email_infrastructure: "Google Workspace", social_mentions_found: 5 },
+    },
   },
   "/v1/whale-alpha-radar": {
     priceUsd: "0.10",
@@ -133,13 +378,40 @@ export const PRICING = {
     description:
       "Complete Multi-Chain Whale Portfolio & DeFi Yield Optimizer Report: profiles wallet across 4 EVM chains (Base, ETH, Arbitrum, Polygon), matches idle USDC/ETH against top DeFiLlama yield pools, and calculates projected annual yield.",
     mimeType: "application/json",
+    tags: ["whale", "portfolio", "defi", "yield", "wallet", "base", "usdc", "analytics"],
+    exampleInput: { address: "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        address: { type: "string", description: "0x EVM wallet address" },
+      },
+      required: ["address"],
+    },
+    exampleOutput: {
+      report_type: "WHALE_PORTFOLIO_AND_YIELD_OPTIMIZER",
+      wallet_tier: "ACTIVE_TRADER",
+      yield_optimization_plan: { best_base_usdc_apy_pct: 8.45 },
+    },
   },
   "/v1/buy-pass": {
     priceUsd: "5.00",
     amount: "5000000", // 5.00 USDC
     description:
-      "Instant 30-Day Prepaid API Key Pass (ak_live_...) for AI agents, LangChain, n8n, Make.com, and developers. Unlocks all 15 Agent Kiosk REST & MCP intelligence tools for 30 days via X-API-KEY header without per-call x402 signing.",
+      "Instant 30-Day Prepaid API Key Pass (ak_live_...) for AI agents, LangChain, n8n, Make.com, and developers. Unlocks all 16 Agent Kiosk REST & MCP intelligence tools for 30 days via X-API-KEY header without per-call x402 signing.",
     mimeType: "application/json",
+    tags: ["prepaid", "api-key", "pass", "subscription", "access", "agents", "mcp"],
+    exampleInput: { agent_name: "my-autonomous-agent" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_name: { type: "string", description: "Optional agent or application identifier" },
+      },
+    },
+    exampleOutput: {
+      api_key: "ak_live_eyJ2IjoxLCJ0aWVyIjoiUFJPXzMwRF9QQVNTIn0.signature",
+      tier: "PRO_30D_PASS",
+      valid_days: 30,
+    },
   },
 };
 
@@ -224,6 +496,7 @@ function decodePaymentHeader(rawHeader) {
 
 /**
  * Build standard x402 v2 PaymentRequired response body and PAYMENT-REQUIRED base64 header
+ * Includes full Coinbase CDP Bazaar & x402scan discovery metadata (serviceName, iconUrl, tags, extensions.bazaar)
  */
 export function build402Challenge(routePath, resourceUrl) {
   const route = PRICING[routePath] || PRICING["/v1/social-search"];
@@ -235,6 +508,9 @@ export function build402Challenge(routePath, resourceUrl) {
       url: resourceUrl,
       description: route.description,
       mimeType: route.mimeType,
+      serviceName: "Agent Kiosk",
+      iconUrl: "https://agent-kiosk.vercel.app/favicon.ico",
+      tags: route.tags || ["agents", "x402", "mcp", "base", "usdc"],
     },
     accepts: [
       {
@@ -244,12 +520,56 @@ export function build402Challenge(routePath, resourceUrl) {
         asset: CONFIG.usdcAsset,
         payTo: CONFIG.payToWallet,
         maxTimeoutSeconds: 60,
+        resource: resourceUrl,
         extra: {
           name: "USD Coin",
           version: "2",
         },
       },
     ],
+    extensions: {
+      bazaar: {
+        info: {
+          input: {
+            type: "http",
+            method: "POST",
+            bodyType: "json",
+            discoverable: true,
+            body: route.exampleInput || {},
+          },
+          output: {
+            type: "json",
+            example: route.exampleOutput || { ok: true },
+          },
+        },
+        schema: {
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          type: "object",
+          properties: {
+            input: {
+              type: "object",
+              properties: {
+                type: { type: "string", const: "http" },
+                method: { type: "string", enum: ["POST", "GET"] },
+                bodyType: { type: "string", const: "json" },
+                discoverable: { type: "boolean", const: true },
+                body: route.inputSchema || { type: "object" },
+              },
+              required: ["type", "method"],
+            },
+            output: {
+              type: "object",
+              properties: {
+                type: { type: "string", const: "json" },
+                example: { type: "object" },
+              },
+              required: ["type"],
+            },
+          },
+          required: ["input", "output"],
+        },
+      },
+    },
   };
 
   const headerBase64 = Buffer.from(JSON.stringify(body)).toString("base64");
