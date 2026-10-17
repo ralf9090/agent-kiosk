@@ -1,0 +1,27 @@
+name: x402 Bazaar Top-1 Keep-Alive & Volume Pulse
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  bazaar-pulse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install viem for EIP-3009 signing
+        run: npm i --no-save viem
+
+      - name: Pulse all 19 endpoints on x402 Bazaar ($0 net self-settlement)
+        env:
+          WALLET_MNEMONIC: ${{ secrets.WALLET_MNEMONIC }}
+        run: node scripts/wallet-cli.js siftah

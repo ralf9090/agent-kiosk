@@ -40,6 +40,7 @@ export const TELEMETRY = {
   mcp_teaser_previews: 0,
   x402_challenges_issued: 0,
   paid_calls_succeeded: 0,
+  external_paid_calls: 0,
   by_route: {},
   recent_events: [],
 };
@@ -85,6 +86,10 @@ export async function ensureTelemetryLoaded(force = false) {
       TELEMETRY.paid_calls_succeeded,
       Number(cloud.paid_calls_succeeded || 0)
     );
+    TELEMETRY.external_paid_calls = Math.max(
+      TELEMETRY.external_paid_calls,
+      Number(cloud.external_paid_calls || 0)
+    );
 
     for (const [r, stats] of Object.entries(cloud.by_route || {})) {
       const local = TELEMETRY.by_route[r] || { challenges: 0, teasers: 0, paid: 0 };
@@ -125,6 +130,7 @@ async function flushTelemetryToCloud() {
       mcp_teaser_previews: TELEMETRY.mcp_teaser_previews,
       x402_challenges_issued: TELEMETRY.x402_challenges_issued,
       paid_calls_succeeded: TELEMETRY.paid_calls_succeeded,
+      external_paid_calls: TELEMETRY.external_paid_calls,
       by_route: TELEMETRY.by_route,
       recent_events: TELEMETRY.recent_events.slice(0, 100),
     };
@@ -159,7 +165,8 @@ async function recordTelemetry(type, route, req, detail = "") {
     TELEMETRY.mcp_discoveries += 1;
   }
   if (type === "mcp_teaser") TELEMETRY.mcp_teaser_previews += 1;
-  if (type === "paid_call") TELEMETRY.paid_calls_succeeded += 1;
+  if (type === "paid_call" || type === "external_paid_call") TELEMETRY.paid_calls_succeeded += 1;
+  if (type === "external_paid_call") TELEMETRY.external_paid_calls += 1;
 
   if (route) {
     if (!TELEMETRY.by_route[route]) {
@@ -167,7 +174,7 @@ async function recordTelemetry(type, route, req, detail = "") {
     }
     if (type === "x402_challenge") TELEMETRY.by_route[route].challenges += 1;
     if (type === "mcp_teaser") TELEMETRY.by_route[route].teasers += 1;
-    if (type === "paid_call") TELEMETRY.by_route[route].paid += 1;
+    if (type === "paid_call" || type === "external_paid_call") TELEMETRY.by_route[route].paid += 1;
   }
   const ua = String(req?.headers?.["user-agent"] || "unknown-agent").slice(0, 80);
   const country = String(req?.headers?.["x-vercel-ip-country"] || "GLOBAL").toUpperCase();
@@ -1104,7 +1111,8 @@ export function createAppServer() {
     <div class="card"><div class="lbl">Toplam Bot İsteği</div><div class="val">${TELEMETRY.total_requests}</div></div>
     <div class="card"><div class="lbl">MCP Keşif / Tadımlık</div><div class="val">${TELEMETRY.mcp_discoveries} / ${TELEMETRY.mcp_teaser_previews}</div></div>
     <div class="card"><div class="lbl">402 Ödeme İstemi</div><div class="val">${TELEMETRY.x402_challenges_issued}</div></div>
-    <div class="card"><div class="lbl">Başarılı Ödeme / Pass</div><div class="val">${TELEMETRY.paid_calls_succeeded}</div></div>
+    <div class="card"><div class="lbl">Vitrin / Toplam İşlem</div><div class="val">${TELEMETRY.paid_calls_succeeded}</div></div>
+    <div class="card" style="border-color:#10b981;"><div class="lbl" style="color:#6ee7b7;">🎯 Dış Müşteri Satışı</div><div class="val" style="color:#34d399;">${TELEMETRY.external_paid_calls || 0}</div></div>
   </div>
   <h2>Uç Nokta Bazlı Bot Hunisi (19 Araç)</h2>
   <table>
@@ -1825,7 +1833,14 @@ export function createAppServer() {
         const data = await ROUTE_HANDLERS[pathname](body, auth);
         const attestation = attestResponse(pathname, data);
 
-        await recordTelemetry("paid_call", pathname, req, auth.mode);
+        const isOwnerBoost =
+          auth.payer && auth.payer.toLowerCase() === CONFIG.payToWallet.toLowerCase();
+        await recordTelemetry(
+          isOwnerBoost ? "paid_call" : "external_paid_call",
+          pathname,
+          req,
+          auth.payer ? `${auth.mode}:${auth.payer.slice(0, 10)}` : auth.mode
+        );
 
         const extraHeaders = auth.settlementHeader
           ? {
