@@ -1,7 +1,10 @@
 /**
- * x402 v2 & v1 Payment Protocol Middleware & Multi-Facilitator Mainnet Settlement Layer
- * Supports 12 high-demand B2A endpoints on Base Mainnet (eip155:8453 / base).
+ * x402 v2 & v1 Payment Protocol Middleware, Stateless Prepaid Pass & Multi-Facilitator Mainnet Settlement Layer
+ * Supports 16 high-demand B2A endpoints (12 core tools, 3 $0.10 deep combo reports, 1 $5.00 30-day API Pass) on Base Mainnet.
  */
+import crypto from "node:crypto";
+
+const EPHEMERAL_FALLBACK_SECRET = crypto.randomBytes(32).toString("hex");
 
 export const CONFIG = {
   // Base / Ethereum wallet address receiving USDC micropayments
@@ -21,6 +24,8 @@ export const CONFIG = {
     "https://facilitator.mogami.tech",
   ],
   apiSecretKey: process.env.API_SECRET_KEY || null,
+  passSigningSecret:
+    process.env.PASS_SIGNING_SECRET || process.env.API_SECRET_KEY || EPHEMERAL_FALLBACK_SECRET,
 };
 
 export const PRICING = {
@@ -108,7 +113,102 @@ export const PRICING = {
       "GitHub repository & open-source competitive intelligence: stars, forks, open issues, latest releases, and top repositories by topic.",
     mimeType: "application/json",
   },
+  "/v1/token-due-diligence": {
+    priceUsd: "0.10",
+    amount: "100000", // 0.10 USDC
+    description:
+      "Institutional 3-in-1 Token Due Diligence Report: combines GoPlus on-chain honeypot/tax security audit, DexScreener order-flow alpha & liquidity depth, and live Reddit/HN social sentiment into a composite investment grade (A-F).",
+    mimeType: "application/json",
+  },
+  "/v1/b2b-company-dossier": {
+    priceUsd: "0.10",
+    amount: "100000", // 0.10 USDC
+    description:
+      "Complete 4-in-1 B2B Sales & Competitive Intelligence Dossier: combines DNS/MX/SaaS tech stack infrastructure, clean website extraction, local business contact/phone leads, and social mentions.",
+    mimeType: "application/json",
+  },
+  "/v1/whale-alpha-radar": {
+    priceUsd: "0.10",
+    amount: "100000", // 0.10 USDC
+    description:
+      "Complete Multi-Chain Whale Portfolio & DeFi Yield Optimizer Report: profiles wallet across 4 EVM chains (Base, ETH, Arbitrum, Polygon), matches idle USDC/ETH against top DeFiLlama yield pools, and calculates projected annual yield.",
+    mimeType: "application/json",
+  },
+  "/v1/buy-pass": {
+    priceUsd: "5.00",
+    amount: "5000000", // 5.00 USDC
+    description:
+      "Instant 30-Day Prepaid API Key Pass (ak_live_...) for AI agents, LangChain, n8n, Make.com, and developers. Unlocks all 15 Agent Kiosk REST & MCP intelligence tools for 30 days via X-API-KEY header without per-call x402 signing.",
+    mimeType: "application/json",
+  },
 };
+
+/**
+ * Issue a stateless HMAC-SHA256 signed 30-day API key (ak_live_<payloadB64>.<sigB64>)
+ */
+export function issuePrepaidPass({ payer = null, txHash = null, days = 30 } = {}) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const expSec = nowSec + days * 86400;
+  const payload = {
+    v: 1,
+    tier: "PRO_30D_PASS",
+    iat: nowSec,
+    exp: expSec,
+    payer: payer || "x402-buyer",
+    tx: txHash || null,
+    jti: crypto.randomBytes(8).toString("hex"),
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sigB64 = crypto
+    .createHmac("sha256", CONFIG.passSigningSecret)
+    .update(payloadB64)
+    .digest("base64url");
+  return {
+    api_key: `ak_live_${payloadB64}.${sigB64}`,
+    tier: payload.tier,
+    issued_at: new Date(nowSec * 1000).toISOString(),
+    expires_at: new Date(expSec * 1000).toISOString(),
+    valid_days: days,
+    payer: payload.payer,
+    tx_hash: payload.tx,
+  };
+}
+
+/**
+ * Verify a stateless HMAC-SHA256 signed API key (ak_live_<payloadB64>.<sigB64>)
+ */
+export function verifyPrepaidPass(token) {
+  if (!token || typeof token !== "string" || !token.startsWith("ak_live_")) {
+    return null;
+  }
+  const raw = token.slice("ak_live_".length);
+  const dotIdx = raw.indexOf(".");
+  if (dotIdx <= 0) return null;
+  const payloadB64 = raw.slice(0, dotIdx);
+  const sigB64 = raw.slice(dotIdx + 1);
+
+  const expectedSig = crypto
+    .createHmac("sha256", CONFIG.passSigningSecret)
+    .update(payloadB64)
+    .digest("base64url");
+
+  const sigBuf = Buffer.from(sigB64);
+  const expBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (!payload.exp || nowSec >= payload.exp) {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Decode payment header supporting standard Base64, Base64URL, or raw JSON string
@@ -161,13 +261,26 @@ export function build402Challenge(routePath, resourceUrl) {
  * Verify AND settle incoming x402 v2/v1 payment header across Base Mainnet facilitators
  */
 export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
-  // 1. Check explicit API_SECRET_KEY (only if configured in environment)
-  const providedKey =
+  // 1. Check explicit API_SECRET_KEY or signed 30-day Prepaid Pass (ak_live_...)
+  const providedKey = (
     req.headers["x-api-key"] ||
-    (req.headers["authorization"] || "").replace(/^Bearer\s+/i, "");
+    (req.headers["authorization"] || "").replace(/^Bearer\s+/i, "")
+  ).trim();
 
   if (CONFIG.apiSecretKey && providedKey && providedKey === CONFIG.apiSecretKey) {
     return { authorized: true, mode: "api-key", settlementHeader: null };
+  }
+
+  if (routePath !== "/v1/buy-pass" && providedKey && providedKey.startsWith("ak_live_")) {
+    const passPayload = verifyPrepaidPass(providedKey);
+    if (passPayload) {
+      return {
+        authorized: true,
+        mode: "prepaid-pass",
+        payer: passPayload.payer,
+        settlementHeader: null,
+      };
+    }
   }
 
   // 2. Require x402 PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header

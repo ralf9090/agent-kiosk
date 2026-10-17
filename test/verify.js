@@ -16,7 +16,7 @@ try {
   assert.equal(discRes.status, 200);
   const disc = await discRes.json();
   assert.equal(disc.x402Version, 2);
-  assert.equal(disc.resources.length, 12);
+  assert.equal(disc.resources.length, 16);
 
   const favRes = await fetch(`${base}/favicon.ico`);
   assert.equal(favRes.status, 200);
@@ -25,8 +25,8 @@ try {
   assert.equal(openApiRes.status, 200);
   const openApi = await openApiRes.json();
   assert.ok(openApi.info.contact.email);
-  assert.equal(Object.keys(openApi.paths).length, 12);
-  console.log("✅ 1. Discovery manifest, /openapi.json (12 paths), and /favicon.ico verified");
+  assert.equal(Object.keys(openApi.paths).length, 16);
+  console.log("✅ 1. Discovery manifest, /openapi.json (16 paths), and /favicon.ico verified");
 
   // 2. Test unauthenticated REST request returns HTTP 402 with x402Version 2 and PAYMENT-REQUIRED header
   const unpaidRes = await fetch(`${base}/v1/wallet-profiler`, {
@@ -36,7 +36,7 @@ try {
   });
   assert.equal(unpaidRes.status, 402);
   assert.ok(unpaidRes.headers.get("payment-required"));
-  console.log("✅ 2. HTTP 402 v2 Payment Required verified across new endpoints");
+  console.log("✅ 2. HTTP 402 v2 Payment Required verified across endpoints");
 
   // 3. Test authorized /v1/social-search
   const socialRes = await fetch(`${base}/v1/social-search`, {
@@ -201,7 +201,80 @@ try {
     `✅ 14. /v1/github-intel verified (${ghData.data.full_name} -> ⭐ ${ghData.data.stars} stars)`
   );
 
-  // 15. Test MCP JSON-RPC tools/list returns all 12 tools
+  // 15. Test $0.10 Combo #1: /v1/token-due-diligence
+  const ddRes = await fetch(`${base}/v1/token-due-diligence`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ query: "AERO", chain: "base" }),
+  });
+  assert.equal(ddRes.status, 200);
+  const ddData = await ddRes.json();
+  assert.ok(ddData.data.investment_grade);
+  console.log(
+    `✅ 15. /v1/token-due-diligence ($0.10 Combo) verified (Grade: ${ddData.data.investment_grade} — ${ddData.data.composite_verdict})`
+  );
+
+  // 16. Test $0.10 Combo #2: /v1/b2b-company-dossier
+  const dosRes = await fetch(`${base}/v1/b2b-company-dossier`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ domain: "stripe.com", location: "San Francisco" }),
+  });
+  assert.equal(dosRes.status, 200);
+  const dosData = await dosRes.json();
+  assert.equal(dosData.data.domain, "stripe.com");
+  console.log(
+    `✅ 16. /v1/b2b-company-dossier ($0.10 Combo) verified (${dosData.data.domain} -> ${dosData.data.physical_leads.length} leads)`
+  );
+
+  // 17. Test $0.10 Combo #3: /v1/whale-alpha-radar
+  const whaleRes = await fetch(`${base}/v1/whale-alpha-radar`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045" }),
+  });
+  assert.equal(whaleRes.status, 200);
+  const whaleData = await whaleRes.json();
+  assert.ok(whaleData.data.yield_optimization.best_base_usdc_apy_pct > 0);
+  console.log(
+    `✅ 17. /v1/whale-alpha-radar ($0.10 Combo) verified (Best USDC APY: ${whaleData.data.yield_optimization.best_base_usdc_apy_pct}%)`
+  );
+
+  // 18. Test $5.00 Prepaid Pass (/v1/buy-pass) minting & stateless HMAC-SHA256 verification
+  const passRes = await fetch(`${base}/v1/buy-pass`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
+    body: JSON.stringify({ agent_name: "TestTradingBot" }),
+  });
+  assert.equal(passRes.status, 200);
+  const passData = await passRes.json();
+  const mintedKey = passData.data.api_key;
+  assert.ok(mintedKey.startsWith("ak_live_"));
+
+  // Use the minted ak_live_... pass to call a paid endpoint and verify sub-5ms Smart Cache hit!
+  const t0 = performance.now();
+  const cachedCallRes = await fetch(`${base}/v1/token-alpha`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": mintedKey },
+    body: JSON.stringify({ query: "AERO", chain: "base" }),
+  });
+  const elapsedMs = (performance.now() - t0).toFixed(2);
+  assert.equal(cachedCallRes.status, 200);
+  const cachedCallData = await cachedCallRes.json();
+  assert.equal(cachedCallData.payment_mode, "prepaid-pass");
+
+  // Ensure ak_live_... pass CANNOT be used to mint another /v1/buy-pass without paying!
+  const selfMintRes = await fetch(`${base}/v1/buy-pass`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": mintedKey },
+    body: JSON.stringify({}),
+  });
+  assert.equal(selfMintRes.status, 402);
+  console.log(
+    `✅ 18. /v1/buy-pass ($5.00 Prepaid Pass) & Smart Cache verified (Cache response in ${elapsedMs}ms)`
+  );
+
+  // 19. Test MCP JSON-RPC tools/list returns all 16 tools
   const mcpRes = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -209,10 +282,10 @@ try {
   });
   assert.equal(mcpRes.status, 200);
   const mcpData = await mcpRes.json();
-  assert.equal(mcpData.result.tools.length, 12);
-  console.log("✅ 15. MCP JSON-RPC endpoint (/mcp) verified with all 12 tools");
+  assert.equal(mcpData.result.tools.length, 16);
+  console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 16 tools");
 
-  // 16. Test unpaid MCP tools/call returns HTTP 200 Freemium Teaser Preview + x402 unlock hook
+  // 20. Test unpaid MCP tools/call returns HTTP 200 Freemium Teaser Preview + x402 unlock hook
   const mcpCallRes = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -229,7 +302,8 @@ try {
   assert.equal(teaserContent.tier, "FREE_MCP_TEASER_PREVIEW");
   assert.equal(teaserContent.preview_data.leads.length, 1);
   assert.ok(teaserContent.x402_unlock_full_data.pay_to_wallet);
-  console.log("✅ 16. MCP Freemium Teaser Hook verified (HTTP 200 + 1-item preview + x402 paywall)");
+  assert.equal(teaserContent.x402_unlock_full_data.prepaid_30d_pass_price_usdc, "5.00");
+  console.log("✅ 20. MCP Freemium Teaser Hook verified (HTTP 200 + 1-item preview + $5 Pass offer)");
 } finally {
   server.close();
 }

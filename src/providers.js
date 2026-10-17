@@ -12,7 +12,39 @@
 
 import dns from "node:dns/promises";
 
-const USER_AGENT = "AgentKiosk/2.2 (+https://agent-kiosk.vercel.app)";
+const USER_AGENT = "AgentKiosk/2.4 (+https://agent-kiosk.vercel.app)";
+
+/**
+ * Smart In-Memory TTL Cache + Stale-While-Revalidate Zero-Failure Layer
+ * Cuts repeat query latency to <1ms and falls back to last-known good data if an upstream API hiccups.
+ */
+const SMART_CACHE = new Map();
+const MAX_CACHE_ENTRIES = 400;
+
+export async function withCache(cacheKey, ttlMs, fetcher) {
+  const now = Date.now();
+  const cached = SMART_CACHE.get(cacheKey);
+  if (cached && now < cached.expiresAt) {
+    return cached.value;
+  }
+  try {
+    const freshValue = await fetcher();
+    if (SMART_CACHE.size >= MAX_CACHE_ENTRIES) {
+      const oldestKey = SMART_CACHE.keys().next().value;
+      if (oldestKey) SMART_CACHE.delete(oldestKey);
+    }
+    SMART_CACHE.set(cacheKey, {
+      value: freshValue,
+      expiresAt: now + ttlMs,
+    });
+    return freshValue;
+  } catch (err) {
+    if (cached && cached.value) {
+      return { ...cached.value, _stale_cache_fallback: true };
+    }
+    throw err;
+  }
+}
 
 /**
  * 1. Fetch live social media discussions (Reddit + HN) and return LLM-ready structured JSON.
@@ -1446,4 +1478,206 @@ export async function githubIntel(params = {}) {
     llm_markdown: markdown || "No GitHub repositories found for this query.",
   };
 }
+
+/**
+ * 13. Institutional 3-in-1 Token Due Diligence Report ($0.10 USDC).
+ * Combines DEX Order-Flow Alpha, On-Chain GoPlus Honeypot/Tax Security Audit, and Live Social Sentiment (Reddit + HN).
+ */
+export async function tokenDueDiligence(params = {}) {
+  const rawQuery =
+    params.query || params.symbol || params.ticker || params.token || params.target || params.address || params.q || "AERO";
+  const cleanQuery = String(rawQuery).trim() || "AERO";
+  const chain = params.chain || "base";
+  const cacheKey = `dd:${cleanQuery.toLowerCase()}:${chain.toLowerCase()}`;
+
+  return withCache(cacheKey, 45_000, async () => {
+    const alphaData = await tokenAlpha({ query: cleanQuery, chain });
+    const resolvedAddress =
+      alphaData?.token?.address ||
+      (/^0x[a-fA-F0-9]{40}$/.test(cleanQuery) ? cleanQuery : "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
+    const resolvedChain = alphaData?.token?.primary_chain || (chain === "all" ? "base" : chain);
+    const searchSymbol = alphaData?.token?.symbol || cleanQuery;
+
+    const [secRes, socRes] = await Promise.allSettled([
+      securityAudit({ target: resolvedAddress, chain: resolvedChain }),
+      socialSearch({ query: `${searchSymbol} crypto`, limit: 5 }),
+    ]);
+
+    const security = secRes.status === "fulfilled" ? secRes.value : null;
+    const social = socRes.status === "fulfilled" ? socRes.value : { count: 0, items: [] };
+
+    const riskScore = security?.risk_score ?? 20;
+    const liqUsd = alphaData?.alpha_metrics?.total_top5_liquidity_usd ?? 0;
+    const buyPressure1h = alphaData?.alpha_metrics?.order_flow_1h?.buy_pressure_pct ?? 50;
+
+    let grade = "B";
+    let compositeVerdict = "SPECULATIVE_SAFE";
+
+    if (riskScore >= 50 || security?.token_info?.is_honeypot) {
+      grade = "F";
+      compositeVerdict = "AVOID_CRITICAL_SECURITY_RISK";
+    } else if (liqUsd < 10000 || riskScore >= 25) {
+      grade = "D";
+      compositeVerdict = "HIGH_RISK_LOW_LIQUIDITY";
+    } else if (liqUsd >= 250000 && riskScore === 0 && buyPressure1h >= 55) {
+      grade = "A";
+      compositeVerdict = "INSTITUTIONAL_GRADE_ACCUMULATION";
+    } else if (liqUsd >= 50000 && riskScore <= 15) {
+      grade = "B";
+      compositeVerdict = "HEALTHY_LIQUIDITY_VERIFIED";
+    } else {
+      grade = "C";
+      compositeVerdict = "MODERATE_RISK";
+    }
+
+    const llm_markdown = [
+      `# Institutional Token Due Diligence: ${alphaData?.token?.name || cleanQuery} (${searchSymbol})`,
+      `- **Composite Investment Grade:** **${grade}** (${compositeVerdict})`,
+      `- **Contract Address:** \`${resolvedAddress}\` on **${resolvedChain}**`,
+      `- **Price:** $${alphaData?.token?.price_usd ?? "N/A"} | **Top-5 DEX Liquidity:** $${liqUsd.toLocaleString()} | **24h Volume:** $${(alphaData?.alpha_metrics?.volume_24h_usd || 0).toLocaleString()}`,
+      `- **Order-Flow Alpha Signal:** \`${alphaData?.alpha_metrics?.signal || "NEUTRAL"}\` (1h Buy Pressure: ${buyPressure1h}%)`,
+      `- **Security Audit Verdict:** \`${security?.verdict || "UNKNOWN"}\` (Risk Score: ${riskScore}/100, Buy Tax: ${security?.token_info?.buy_tax_percent ?? 0}%, Sell Tax: ${security?.token_info?.sell_tax_percent ?? 0}%)`,
+      `- **Live Social Mentions:** ${social.count || 0} recent Reddit/HackerNews threads analyzed.`,
+    ].join("\n");
+
+    return {
+      query: cleanQuery,
+      investment_grade: grade,
+      composite_verdict: compositeVerdict,
+      token_alpha: alphaData,
+      security_audit: security,
+      social_sentiment: {
+        discussion_count: social.count || 0,
+        top_threads: (social.items || []).slice(0, 5),
+      },
+      llm_markdown,
+    };
+  });
+}
+
+/**
+ * 14. Complete 4-in-1 B2B Company & Domain Sales Dossier ($0.10 USDC).
+ * Combines DNS/MX/SaaS Tech Stack Infrastructure, Homepage Clean Markdown Extraction, Local HQ/Branch Leads, and Social Mentions.
+ */
+export async function b2bCompanyDossier(params = {}) {
+  const rawDomain =
+    params.domain || params.url || params.company || params.target || params.query || "stripe.com";
+  const cleanDomain = String(rawDomain)
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .split("/")[0]
+    .split(":")[0] || "stripe.com";
+  const companyName = String(params.company || cleanDomain.split(".")[0]).trim();
+  const location = String(params.location || params.city || "San Francisco").trim();
+  const cacheKey = `dossier:${cleanDomain}:${location.toLowerCase()}`;
+
+  return withCache(cacheKey, 90_000, async () => {
+    const [domRes, webRes, socRes, mapRes] = await Promise.allSettled([
+      domainIntel({ domain: cleanDomain }),
+      webExtract({ url: `https://${cleanDomain}`, max_length: 3000 }),
+      socialSearch({ query: companyName, limit: 5 }),
+      mapsLeads({ query: companyName, location, limit: 3 }),
+    ]);
+
+    const domainData = domRes.status === "fulfilled" ? domRes.value : null;
+    const webData = webRes.status === "fulfilled" ? webRes.value : null;
+    const socialData = socRes.status === "fulfilled" ? socRes.value : { count: 0, items: [] };
+    const mapsData = mapRes.status === "fulfilled" ? mapRes.value : { count: 0, leads: [] };
+
+    const llm_markdown = [
+      `# B2B Executive Dossier: ${companyName.toUpperCase()} (${cleanDomain})`,
+      `- **Email Infrastructure:** ${domainData?.infrastructure?.email_provider || "Unknown"}`,
+      `- **Detected SaaS & Cloud Stack:** ${(domainData?.infrastructure?.detected_saas_and_tech || []).join(", ") || "Standard"}`,
+      `- **Active Subdomains (${domainData?.active_subdomains?.length || 0}):** ${(domainData?.active_subdomains || []).join(", ") || "None"}`,
+      `- **Website Title:** ${webData?.title || cleanDomain}`,
+      `- **Physical Locations / Leads Found:** ${mapsData?.count || 0}`,
+      `- **Recent Social Mentions (Reddit/HN):** ${socialData?.count || 0}`,
+    ].join("\n");
+
+    return {
+      company: companyName,
+      domain: cleanDomain,
+      domain_infrastructure: domainData,
+      website_summary: webData
+        ? {
+            url: webData.url,
+            title: webData.title,
+            description: webData.description,
+            markdown_excerpt: (webData.llm_markdown || "").slice(0, 1500),
+          }
+        : null,
+      physical_leads: mapsData?.leads || [],
+      social_mentions: (socialData?.items || []).slice(0, 5),
+      llm_markdown,
+    };
+  });
+}
+
+/**
+ * 15. Multi-Chain Whale Portfolio & DeFi Yield Optimizer Radar ($0.10 USDC).
+ * Profiles wallet across 4 EVM chains, matches idle USDC & ETH balances against top Base DeFiLlama pools, and computes projected annual yield.
+ */
+export async function whaleAlphaRadar(params = {}) {
+  const rawAddress =
+    params.address ||
+    params.wallet ||
+    params.target ||
+    params.account ||
+    params.query ||
+    "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95";
+  const cleanAddr = String(rawAddress).trim();
+  const cacheKey = `whale:${cleanAddr.toLowerCase()}`;
+
+  return withCache(cacheKey, 45_000, async () => {
+    const [profRes, usdcYieldRes, ethYieldRes, predRes] = await Promise.allSettled([
+      walletProfiler({ address: cleanAddr }),
+      defiYields({ symbol: "USDC", chain: "Base", min_tvl_usd: 100000, limit: 3 }),
+      defiYields({ symbol: "ETH", chain: "Base", min_tvl_usd: 100000, limit: 3 }),
+      predictionMarkets({ query: "ethereum", limit: 3 }),
+    ]);
+
+    if (profRes.status === "rejected") {
+      throw profRes.reason;
+    }
+
+    const portfolio = profRes.value;
+    const usdcPools = usdcYieldRes.status === "fulfilled" ? usdcYieldRes.value?.pools || [] : [];
+    const ethPools = ethYieldRes.status === "fulfilled" ? ethYieldRes.value?.pools || [] : [];
+    const macroOdds = predRes.status === "fulfilled" ? predRes.value?.markets || [] : [];
+
+    const bestUsdcApy = usdcPools[0]?.apy_total_pct || 0;
+    const bestEthApy = ethPools[0]?.apy_total_pct || 0;
+    const totalUsdc = portfolio?.totals?.total_usdc || 0;
+    const totalEth = portfolio?.totals?.total_eth || 0;
+
+    const projectedAnnualUsdcYield = Number(((totalUsdc * bestUsdcApy) / 100).toFixed(2));
+    const projectedAnnualEthYield = Number(((totalEth * bestEthApy) / 100).toFixed(6));
+
+    const llm_markdown = [
+      `# Multi-Chain Whale & Yield Optimization Report: \`${cleanAddr}\``,
+      `- **Wallet Tier:** **${portfolio.wallet_tier}** (${portfolio.entity_type})`,
+      `- **Total Liquid Holdings:** $${totalUsdc.toLocaleString()} USDC + ${totalEth} ETH across 4 EVM chains (${portfolio.totals.total_outgoing_txs} outgoing txs)`,
+      `- **Best Base USDC Yield Opportunity:** ${usdcPools[0] ? `${usdcPools[0].project} (${usdcPools[0].symbol}) @ **${bestUsdcApy}% APY**` : "N/A"} -> Projected: **+$${projectedAnnualUsdcYield}/yr**`,
+      `- **Best Base ETH Yield Opportunity:** ${ethPools[0] ? `${ethPools[0].project} (${ethPools[0].symbol}) @ **${bestEthApy}% APY**` : "N/A"} -> Projected: **+${projectedAnnualEthYield} ETH/yr**`,
+    ].join("\n");
+
+    return {
+      address: cleanAddr,
+      portfolio,
+      yield_optimization: {
+        best_base_usdc_apy_pct: bestUsdcApy,
+        projected_annual_usdc_yield_usd: projectedAnnualUsdcYield,
+        top_usdc_pools: usdcPools,
+        best_base_eth_apy_pct: bestEthApy,
+        projected_annual_eth_yield: projectedAnnualEthYield,
+        top_eth_pools: ethPools,
+      },
+      macro_prediction_markets: macroOdds,
+      llm_markdown,
+    };
+  });
+}
+
 

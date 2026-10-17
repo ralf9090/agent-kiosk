@@ -18,6 +18,9 @@ import {
   predictionMarkets,
   defiYields,
   githubIntel,
+  tokenDueDiligence,
+  b2bCompanyDossier,
+  whaleAlphaRadar,
 } from "./providers.js";
 
 const HANDLERS = {
@@ -33,6 +36,17 @@ const HANDLERS = {
   prediction_markets: predictionMarkets,
   defi_yields: defiYields,
   github_intel: githubIntel,
+  token_due_diligence: tokenDueDiligence,
+  b2b_company_dossier: b2bCompanyDossier,
+  whale_alpha_radar: whaleAlphaRadar,
+  buy_prepaid_pass: async () => ({
+    status: "PAYMENT_REQUIRED_FOR_LIVE_KEY",
+    tier: "PRO_30D_PASS",
+    price_usdc: "5.00",
+    valid_days: 30,
+    api_key:
+      "[LOCKED — Send POST https://agent-kiosk.vercel.app/v1/buy-pass with $5.00 USDC x402 payment on Base to mint your live 30-day ak_live_... API key]",
+  }),
 };
 
 const TOOL_TO_ROUTE = {
@@ -48,6 +62,10 @@ const TOOL_TO_ROUTE = {
   prediction_markets: "/v1/prediction-markets",
   defi_yields: "/v1/defi-yields",
   github_intel: "/v1/github-intel",
+  token_due_diligence: "/v1/token-due-diligence",
+  b2b_company_dossier: "/v1/b2b-company-dossier",
+  whale_alpha_radar: "/v1/whale-alpha-radar",
+  buy_prepaid_pass: "/v1/buy-pass",
 };
 
 const BASE_URL = process.env.PUBLIC_BASE_URL || "https://agent-kiosk.vercel.app";

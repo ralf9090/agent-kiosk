@@ -1,7 +1,7 @@
 {
   "name": "agent-kiosk",
-  "version": "2.3.1",
-  "description": "12-in-1 B2A Intelligence Supermarket: DeFi Alpha, Whale Wallet Profiler, Smart Contract Security, Prediction Markets, DeFi Yields, B2B Leads & Research via x402 (Base USDC) and MCP",
+  "version": "2.4.0",
+  "description": "16-in-1 B2A Intelligence Supermarket: DeFi Alpha, Whale Wallet Profiler, Smart Contract Security, Prediction Markets, DeFi Yields, B2B Leads & Research via x402 (Base USDC) and MCP",
   "license": "MIT",
   "type": "module",
   "main": "src/server.js",

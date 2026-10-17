@@ -12,8 +12,12 @@ import {
   predictionMarkets,
   defiYields,
   githubIntel,
+  tokenDueDiligence,
+  b2bCompanyDossier,
+  whaleAlphaRadar,
+  withCache,
 } from "./providers.js";
-import { CONFIG, PRICING, verifyAndSettlePayment } from "./x402.js";
+import { CONFIG, PRICING, verifyAndSettlePayment, issuePrepaidPass } from "./x402.js";
 
 const PORT = Number(process.env.PORT || 4020);
 
@@ -266,6 +270,78 @@ export const MCP_TOOLS = [
       required: ["query"],
     },
   },
+  {
+    name: "token_due_diligence",
+    description:
+      "Institutional 3-in-1 Token Due Diligence Report ($0.10 USDC). Combines GoPlus on-chain honeypot/tax security audit, DexScreener DEX order-flow alpha & liquidity depth, and live Reddit/HN social sentiment into a composite investment grade (A-F).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Token symbol (e.g., 'AERO', 'VIRTUAL', 'PEPE') or 0x contract address",
+        },
+        chain: {
+          type: "string",
+          enum: ["base", "ethereum", "solana", "arbitrum", "bsc", "all"],
+          description: "Blockchain network (default: 'base')",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "b2b_company_dossier",
+    description:
+      "Complete 4-in-1 B2B Sales & Competitive Intelligence Dossier ($0.10 USDC). Combines DNS/MX/SaaS tech stack infrastructure, clean website extraction, local business contact/phone leads, and live social mentions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        domain: {
+          type: "string",
+          description: "Company domain name (e.g., 'stripe.com', 'vercel.com')",
+        },
+        company: {
+          type: "string",
+          description: "Optional company brand name (e.g., 'Stripe')",
+        },
+        location: {
+          type: "string",
+          description: "Optional HQ or target city for physical lead lookup (default: 'San Francisco')",
+        },
+      },
+      required: ["domain"],
+    },
+  },
+  {
+    name: "whale_alpha_radar",
+    description:
+      "Complete Multi-Chain Whale Portfolio & DeFi Yield Optimizer Report ($0.10 USDC). Profiles any 0x wallet across 4 EVM chains (Base, Ethereum, Arbitrum, Polygon), matches idle USDC/ETH balances against top DeFiLlama yield pools, and calculates projected annual yield.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        address: {
+          type: "string",
+          description: "0x... 40-hex EVM wallet address to profile and optimize",
+        },
+      },
+      required: ["address"],
+    },
+  },
+  {
+    name: "buy_prepaid_pass",
+    description:
+      "Mint a 30-Day Prepaid API Key Pass (ak_live_...) for $5.00 USDC on Base via x402. Unlocks all 15 Agent Kiosk REST & MCP intelligence tools for 30 days via the X-API-KEY header without per-call x402 signing (ideal for LangChain, n8n, Make.com, OpenAI Actions, and Python/JS bots).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_name: {
+          type: "string",
+          description: "Optional identifier or name for your agent/workflow",
+        },
+      },
+    },
+  },
 ].map((tool) => ({
   ...tool,
   annotations: {
@@ -280,19 +356,59 @@ export const MCP_TOOLS = [
   },
 }));
 
+async function buyPassHandler(params = {}, auth = null) {
+  if (!auth || !auth.authorized) {
+    return {
+      status: "PAYMENT_REQUIRED_FOR_LIVE_KEY",
+      tier: "PRO_30D_PASS",
+      price_usdc: "5.00",
+      valid_days: 30,
+      api_key:
+        "[LOCKED — Send POST /v1/buy-pass with $5.00 USDC x402 payment on Base to mint your live 30-day ak_live_... API key]",
+      usage_instructions:
+        "Once minted, pass header 'X-API-KEY: ak_live_...' on any /v1/* or /mcp request to unlock full unmasked data for 30 days without signing individual x402 transactions.",
+    };
+  }
+  const issued = issuePrepaidPass({
+    payer: auth.payer || params.agent_name || "x402-buyer",
+    txHash: auth.txHash || null,
+    days: 30,
+  });
+  return {
+    ...issued,
+    usage_instructions:
+      "Pass header 'X-API-KEY: " +
+      issued.api_key +
+      "' (or 'Authorization: Bearer " +
+      issued.api_key +
+      "') on any POST /v1/* or POST /mcp request to receive full unmasked datasets for 30 days.",
+  };
+}
+
+function cachedProvider(name, fn, ttlMs = 45_000) {
+  return async (params = {}) => {
+    const key = `prov:${name}:${JSON.stringify(params)}`;
+    return withCache(key, ttlMs, () => fn(params));
+  };
+}
+
 const ROUTE_HANDLERS = {
-  "/v1/social-search": socialSearch,
-  "/v1/maps-leads": mapsLeads,
-  "/v1/web-extract": webExtract,
-  "/v1/security-audit": securityAudit,
-  "/v1/token-alpha": tokenAlpha,
-  "/v1/domain-intel": domainIntel,
-  "/v1/package-audit": packageAudit,
-  "/v1/academic-search": academicSearch,
-  "/v1/wallet-profiler": walletProfiler,
-  "/v1/prediction-markets": predictionMarkets,
-  "/v1/defi-yields": defiYields,
-  "/v1/github-intel": githubIntel,
+  "/v1/social-search": cachedProvider("social", socialSearch, 45_000),
+  "/v1/maps-leads": cachedProvider("maps", mapsLeads, 120_000),
+  "/v1/web-extract": cachedProvider("web", webExtract, 90_000),
+  "/v1/security-audit": cachedProvider("sec", securityAudit, 60_000),
+  "/v1/token-alpha": cachedProvider("alpha", tokenAlpha, 30_000),
+  "/v1/domain-intel": cachedProvider("domain", domainIntel, 180_000),
+  "/v1/package-audit": cachedProvider("pkg", packageAudit, 180_000),
+  "/v1/academic-search": cachedProvider("acad", academicSearch, 180_000),
+  "/v1/wallet-profiler": cachedProvider("wallet", walletProfiler, 45_000),
+  "/v1/prediction-markets": cachedProvider("pred", predictionMarkets, 45_000),
+  "/v1/defi-yields": cachedProvider("yields", defiYields, 90_000),
+  "/v1/github-intel": cachedProvider("gh", githubIntel, 120_000),
+  "/v1/token-due-diligence": tokenDueDiligence,
+  "/v1/b2b-company-dossier": b2bCompanyDossier,
+  "/v1/whale-alpha-radar": whaleAlphaRadar,
+  "/v1/buy-pass": buyPassHandler,
 };
 
 const TOOL_TO_ROUTE = {
@@ -308,6 +424,10 @@ const TOOL_TO_ROUTE = {
   prediction_markets: "/v1/prediction-markets",
   defi_yields: "/v1/defi-yields",
   github_intel: "/v1/github-intel",
+  token_due_diligence: "/v1/token-due-diligence",
+  b2b_company_dossier: "/v1/b2b-company-dossier",
+  whale_alpha_radar: "/v1/whale-alpha-radar",
+  buy_prepaid_pass: "/v1/buy-pass",
 };
 
 function readJsonBody(req) {
@@ -676,7 +796,7 @@ export function createAppServer() {
       });
     }
 
-    // 4. Paid x402 v2/v1 Endpoints (all 12 routes)
+    // 4. Paid x402 v2/v1 Endpoints (all 16 routes)
     if ((req.method === "POST" || req.method === "GET") && ROUTE_HANDLERS[pathname]) {
       const resourceUrl = `${baseUrl}${pathname}`;
       const auth = await verifyAndSettlePayment(req, pathname, resourceUrl);
@@ -692,7 +812,7 @@ export function createAppServer() {
         const jsonBody = req.method === "POST" ? await readJsonBody(req) : {};
         const body = { ...queryParams, ...jsonBody };
 
-        const data = await ROUTE_HANDLERS[pathname](body);
+        const data = await ROUTE_HANDLERS[pathname](body, auth);
 
         const extraHeaders = auth.settlementHeader
           ? {
@@ -721,7 +841,7 @@ export function createAppServer() {
     if (req.method === "GET" && pathname === "/mcp") {
       return sendJson(res, 200, {
         name: "agent-kiosk",
-        version: "2.3.1",
+        version: "2.4.0",
         protocol: "mcp-streamable-http",
         protocolVersion: "2024-11-05",
         endpoint: `${baseUrl}/mcp`,
@@ -749,7 +869,7 @@ export function createAppServer() {
             result: {
               protocolVersion: negotiatedVersion,
               capabilities: { tools: {}, resources: {}, prompts: {} },
-              serverInfo: { name: "agent-kiosk", version: "2.3.1" },
+              serverInfo: { name: "agent-kiosk", version: "2.4.0" },
             },
           });
         }
@@ -828,13 +948,13 @@ export function createAppServer() {
             // Freemium Teaser Mode for MCP (Smithery / Cursor / Claude):
             // Returns HTTP 200 OK with 1 teaser item + exact x402 USDC payment instructions to unlock full data
             const teaserArgs = { ...args, limit: 2, max_length: 600 };
-            const rawPreview = await ROUTE_HANDLERS[mappedRoute](teaserArgs);
+            const rawPreview = await ROUTE_HANDLERS[mappedRoute](teaserArgs, null);
             const priceUsd = PRICING[mappedRoute]?.priceUsd || "0.02";
-            const lockNote = `[LOCKED — Pay $${priceUsd} USDC on Base via x402 POST ${baseUrl}${mappedRoute} to unlock full dataset]`;
+            const lockNote = `[LOCKED — Pay $${priceUsd} USDC on Base via x402 POST ${baseUrl}${mappedRoute} OR use a $5.00 30-Day Prepaid Pass (POST ${baseUrl}/v1/buy-pass) to unlock full dataset]`;
 
             const teaserPayload = {
               tier: "FREE_MCP_TEASER_PREVIEW",
-              notice: `Showing limited preview. Unlock full unmasked results (up to 25 items, phone numbers, full markdown & alpha signals) by calling POST ${baseUrl}${mappedRoute} with x402 v2 payment ($${priceUsd} USDC on Base).`,
+              notice: `Showing limited preview. Unlock full unmasked results by calling POST ${baseUrl}${mappedRoute} with x402 payment ($${priceUsd} USDC on Base) OR mint a 30-day X-API-KEY pass ($5.00 USDC at POST ${baseUrl}/v1/buy-pass).`,
               preview_data: {
                 ...rawPreview,
                 items: rawPreview.items ? rawPreview.items.slice(0, 1) : undefined,
@@ -864,6 +984,8 @@ export function createAppServer() {
                 network: CONFIG.network,
                 usdc_contract: CONFIG.usdcAsset,
                 pay_to_wallet: CONFIG.payToWallet,
+                prepaid_30d_pass_endpoint: `${baseUrl}/v1/buy-pass`,
+                prepaid_30d_pass_price_usdc: "5.00",
                 payment_required_challenge: auth.challenge,
               },
             };
@@ -882,7 +1004,7 @@ export function createAppServer() {
             );
           }
 
-          const output = await ROUTE_HANDLERS[mappedRoute](args);
+          const output = await ROUTE_HANDLERS[mappedRoute](args, auth);
 
           const extraHeaders = auth.settlementHeader
             ? {
