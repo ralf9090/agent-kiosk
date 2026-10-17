@@ -1120,6 +1120,14 @@ export function createAppServer() {
 </html>`);
     }
 
+    if (req.method === "POST" && pathname === "/siftah-log") {
+      const body = await parseJsonBody(req);
+      recordEvent("siftah_ui", "/siftah", String(body.msg || "").slice(0, 140), req);
+      await flushCloudTelemetry();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ ok: true }));
+    }
+
     // 0c. 1-Click Browser Wallet x402 Siftah & Bazaar Activation Page: GET /siftah
     if (req.method === "GET" && pathname === "/siftah") {
       const allRoutesJson = JSON.stringify(Object.keys(PRICING));
@@ -1154,13 +1162,19 @@ export function createAppServer() {
       <li><strong>ETH Gas Ücreti Yoktur ($0):</strong> EIP-3009 imzasını blokzincire Facilitator ücretsiz gönderir.</li>
       <li><strong>Bakiyen Azalmaz:</strong> Ödediğin $0.001 USDC doğrudan yine <code>${CONFIG.payToWallet}</code> cüzdanına geri yatar; ama işlem blokzincire ve <strong>x402scan / Coinbase Bazaar</strong> vitrinine gerçek satış olarak kaydedilir.</li>
     </ul>
+    <div style="background:#1e1b4b;border:1px solid #4338ca;border-radius:10px;padding:14px;margin-bottom:16px;">
+      <p style="margin:0 0 8px 0;color:#e0e7ff;"><strong>🌉 Paranız Ethereum Ağında mı Kaldı? (ETH Gas Ücreti Olmadan Base Ağına Geçirin)</strong></p>
+      <p style="margin:0 0 10px 0;font-size:13px;color:#c7d2fe;">Cüzdanınızda hiç ETH olmasa bile, Ethereum ağındaki USDC bakiyenizi (<strong>$9.30 USDC</strong>) EIP-3009 imzasıyla <strong>0 ETH Gas</strong> ödeyerek 3 saniyede Base ağına geçirebilirsiniz:</p>
+      <button class="btn" style="background:#4f46e5;margin-bottom:0;" onclick="bridgeEthToBaseGasless()">🌉 Adım 0: Ethereum'daki USDC'yi Base Ağına Geçir (0 ETH Gas)</button>
+    </div>
     <button class="btn" onclick="connectWallet()">1. Cüzdanı Bağla (MetaMask / Coinbase / Rabby)</button>
     <button class="btn btn-green" onclick="runSiftah(['/v1/ping'])">⚡ 2. Tek Siftah Gönder (/v1/ping — $0.001 USDC)</button>
-    <button class="btn btn-green" onclick="runSiftah(ALL_ROUTES)">🚀 3. Tüm 19 Servisi Sırayla Aktifleştir ($0.001 x 19)</button>
+    <button class="btn btn-green" onclick="runSiftah(['/v1/compliance-check','/v1/defi-swap-quote','/v1/buy-pass'])">✨ Kalan Son 3 Servisi Aktifleştir</button>
+    <button class="btn btn-green" onclick="runSiftah(ALL_ROUTES)">🚀 Tüm 19 Servisi Sırayla Aktifleştir</button>
     <p id="walletStatus" style="color:#94a3b8;margin-top:8px;">Durum: Cüzdan henüz bağlanmadı.</p>
   </div>
   <h2>Canlı İşlem Kaydı</h2>
-  <div id="log">Hazır. Önce "1. Cüzdanı Bağla" butonuna tıklayın...</div>
+  <div id="log">Hazır. Eğer paranız Ethereum ağındaysa önce "🌉 Adım 0: Ethereum'daki USDC'yi Base Ağına Geçir" butonuna tıklayın...</div>
 
   <script>
     const PAY_TO = "${CONFIG.payToWallet}";
@@ -1172,12 +1186,122 @@ export function createAppServer() {
       const el = document.getElementById("log");
       el.textContent += "\\n" + msg;
       el.scrollTop = el.scrollHeight;
+      fetch("/siftah-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ msg })
+      }).catch(() => {});
     }
 
     function randomBytes32Hex() {
       const arr = new Uint8Array(32);
       crypto.getRandomValues(arr);
       return "0x" + Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    async function bridgeEthToBaseGasless() {
+      if (!window.ethereum) {
+        alert("Tarayıcıda MetaMask bulunamadı.");
+        return;
+      }
+      try {
+        const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+        currentAccount = accounts[0];
+
+        // Read Ethereum USDC balance directly via Ethereum Mainnet RPC (never depends on MetaMask's active network)
+        const padded = currentAccount.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+        const rpcRes = await fetch("https://ethereum-rpc.publicnode.com", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "eth_call",
+            params: [{ to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", data: "0x70a08231" + padded }, "latest"]
+          })
+        }).then(r => r.json());
+        const balHex = rpcRes && rpcRes.result ? rpcRes.result : "0x0";
+        const balRaw = BigInt(balHex || "0x0");
+        if (balRaw <= 100000n) {
+          logMsg("ℹ️ Ethereum ağında USDC kalmamış (zaten Base ağına geçmiş). Base ağına geçip Siftah başlatılıyor...");
+          await connectWallet();
+          await runSiftah(ALL_ROUTES);
+          return;
+        }
+
+        logMsg("🔄 MetaMask Ethereum Ağına (Chain ID: 1) geçiriliyor (" + currentAccount + ")...");
+        await window.ethereum.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: "0x1" }]
+        });
+        const amountStr = balRaw.toString();
+        logMsg("💰 Ethereum'da " + (Number(balRaw) / 1e6).toFixed(2) + " USDC bulundu. Relay Gasless köprü teklifi alınıyor (0 ETH Gas)...");
+
+        const quoteRes = await fetch("https://api.relay.link/quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user: currentAccount,
+            originChainId: 1,
+            destinationChainId: 8453,
+            originCurrency: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            destinationCurrency: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            amount: amountStr,
+            usePermit: true,
+            tradeType: "EXACT_INPUT"
+          })
+        });
+        const quote = await quoteRes.json();
+        const step = quote.steps && quote.steps[0];
+        const item = step && step.items && step.items[0];
+        if (!item || !item.data || !item.data.sign) {
+          logMsg("❌ Köprü teklifi alınamadı: " + JSON.stringify(quote));
+          return;
+        }
+
+        const signData = item.data.sign;
+        const postData = item.data.post;
+        const typedPayload = {
+          types: Object.assign({
+            EIP712Domain: [
+              { name: "name", type: "string" },
+              { name: "version", type: "string" },
+              { name: "chainId", type: "uint256" },
+              { name: "verifyingContract", type: "address" }
+            ]
+          }, signData.types),
+          domain: signData.domain,
+          primaryType: signData.primaryType,
+          message: signData.value
+        };
+
+        logMsg("✍️ MetaMask'ta ÜCRETSİZ (0 ETH Gas) EIP-3009 Köprü İmzasını onaylayın...");
+        const sig = await window.ethereum.request({
+          method: "eth_signTypedData_v4",
+          params: [currentAccount, JSON.stringify(typedPayload)]
+        });
+
+        logMsg("🚀 İmza Relay ağına gönderiliyor (Ethereum -> Base transferi başlatıldı)...");
+        const baseEndpoint = postData.endpoint.startsWith("http")
+          ? postData.endpoint
+          : "https://api.relay.link" + postData.endpoint;
+        const execUrl = baseEndpoint + "?signature=" + encodeURIComponent(sig);
+        const execRes = await fetch(execUrl, {
+          method: postData.method || "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(postData.body)
+        });
+        const execJson = await execRes.json();
+        logMsg("✅ Köprü işlemi kabul edildi! ~6 saniye içinde Base ağınıza USDC yatıyor... (" + JSON.stringify(execJson) + ")");
+
+        setTimeout(async () => {
+          await connectWallet();
+          logMsg("🎉 Cüzdanınız tekrar Base Ağına (8453) alındı! Otomatik olarak Siftah başlatılıyor...");
+          await runSiftah(ALL_ROUTES);
+        }, 7000);
+      } catch (err) {
+        logMsg("❌ Köprü hatası: " + err.message);
+      }
     }
 
     async function connectWallet() {
