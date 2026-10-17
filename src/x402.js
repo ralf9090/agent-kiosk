@@ -1,6 +1,6 @@
 /**
- * x402 v2 Payment Protocol Middleware & Verification + Settlement Layer
- * Supports 8 high-demand B2A endpoints on Base Mainnet (eip155:8453).
+ * x402 v2 & v1 Payment Protocol Middleware & Multi-Facilitator Mainnet Settlement Layer
+ * Supports 12 high-demand B2A endpoints on Base Mainnet (eip155:8453 / base).
  */
 
 export const CONFIG = {
@@ -10,7 +10,11 @@ export const CONFIG = {
   network: process.env.X402_NETWORK || "eip155:8453",
   // Base Mainnet USDC contract address
   usdcAsset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-  facilitatorUrl: process.env.X402_FACILITATOR_URL || "https://x402.org/facilitator",
+  // Live Base Mainnet facilitators (supports both x402 v2 eip155:8453 and v1 base)
+  facilitators: [
+    process.env.X402_FACILITATOR_URL || "https://facilitator.payai.network",
+    "https://facilitator.daydreams.systems",
+  ],
   apiSecretKey: process.env.API_SECRET_KEY || null,
 };
 
@@ -137,7 +141,7 @@ export function build402Challenge(routePath, resourceUrl) {
 }
 
 /**
- * Verify AND settle incoming x402 v2/v1 payment header (or validate configured API_SECRET_KEY)
+ * Verify AND settle incoming x402 v2/v1 payment header across Base Mainnet facilitators
  */
 export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
   // 1. Check explicit API_SECRET_KEY (only if configured in environment)
@@ -162,95 +166,106 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
     };
   }
 
-  const paymentRequirements = challenge.accepts[0];
+  const route = PRICING[routePath] || PRICING["/v1/social-search"];
 
   try {
     const decoded = JSON.parse(Buffer.from(paymentHeader, "base64").toString("utf8"));
+    const clientVersion = Number(decoded.x402Version) === 1 ? 1 : 2;
 
-    // Step A: Verify signature with x402 facilitator
-    const verifyRes = await fetch(`${CONFIG.facilitatorUrl}/verify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        x402Version: 2,
-        paymentPayload: decoded,
-        paymentHeader,
-        paymentRequirements,
-      }),
-      signal: AbortSignal.timeout(6000),
-    });
+    // Match v1 ('base' + maxAmountRequired) or v2 ('eip155:8453' + amount) client payloads
+    const paymentRequirements =
+      clientVersion === 1
+        ? {
+            scheme: "exact",
+            network: "base",
+            maxAmountRequired: route.amount,
+            resource: resourceUrl,
+            description: route.description,
+            mimeType: route.mimeType,
+            payTo: CONFIG.payToWallet,
+            maxTimeoutSeconds: 60,
+            asset: CONFIG.usdcAsset,
+            extra: { name: "USD Coin", version: "2" },
+          }
+        : challenge.accepts[0];
 
-    if (!verifyRes.ok) {
-      return {
-        authorized: false,
-        statusCode: 402,
-        challenge: {
-          ...challenge,
-          error: `Facilitator verification failed (HTTP ${verifyRes.status}).`,
-        },
-        challengeHeader: headerBase64,
-      };
+    let lastError = "Facilitator verification failed.";
+
+    for (const facilitatorUrl of CONFIG.facilitators) {
+      try {
+        const reqBody = JSON.stringify({
+          x402Version: clientVersion,
+          paymentPayload: decoded,
+          paymentHeader,
+          paymentRequirements,
+        });
+
+        const verifyRes = await fetch(`${facilitatorUrl}/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: reqBody,
+          signal: AbortSignal.timeout(6000),
+        });
+
+        if (!verifyRes.ok) {
+          lastError = `Facilitator ${facilitatorUrl} verify returned HTTP ${verifyRes.status}`;
+          continue;
+        }
+
+        const verifyData = await verifyRes.json();
+        if (!verifyData.isValid) {
+          return {
+            authorized: false,
+            statusCode: 402,
+            challenge: {
+              ...challenge,
+              error: verifyData.invalidReason || "Invalid or expired PAYMENT-SIGNATURE.",
+            },
+            challengeHeader: headerBase64,
+          };
+        }
+
+        // Settle transaction on Base Mainnet so USDC lands in payToWallet
+        const settleRes = await fetch(`${facilitatorUrl}/settle`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: reqBody,
+          signal: AbortSignal.timeout(10000),
+        });
+
+        if (!settleRes.ok) {
+          lastError = `Facilitator ${facilitatorUrl} settle returned HTTP ${settleRes.status}`;
+          continue;
+        }
+
+        const settleData = await settleRes.json();
+        if (!settleData.success) {
+          lastError = settleData.error || settleData.errorReason || "Settlement rejected on-chain.";
+          continue;
+        }
+
+        const settlementHeader = Buffer.from(JSON.stringify(settleData)).toString("base64");
+
+        return {
+          authorized: true,
+          mode: "x402",
+          payer: decoded?.payload?.authorization?.from || null,
+          txHash: settleData.txHash || settleData.transaction || null,
+          settlementHeader,
+        };
+      } catch (innerErr) {
+        lastError = innerErr.message;
+      }
     }
-
-    const verifyData = await verifyRes.json();
-    if (!verifyData.isValid) {
-      return {
-        authorized: false,
-        statusCode: 402,
-        challenge: {
-          ...challenge,
-          error: verifyData.invalidReason || "Invalid or expired PAYMENT-SIGNATURE.",
-        },
-        challengeHeader: headerBase64,
-      };
-    }
-
-    // Step B: Settle transaction on-chain so USDC lands in payToWallet
-    const settleRes = await fetch(`${CONFIG.facilitatorUrl}/settle`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        x402Version: 2,
-        paymentPayload: decoded,
-        paymentHeader,
-        paymentRequirements,
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!settleRes.ok) {
-      return {
-        authorized: false,
-        statusCode: 402,
-        challenge: {
-          ...challenge,
-          error: `On-chain payment settlement failed (HTTP ${settleRes.status}).`,
-        },
-        challengeHeader: headerBase64,
-      };
-    }
-
-    const settleData = await settleRes.json();
-    if (!settleData.success) {
-      return {
-        authorized: false,
-        statusCode: 402,
-        challenge: {
-          ...challenge,
-          error: settleData.error || "Payment settlement was rejected on-chain.",
-        },
-        challengeHeader: headerBase64,
-      };
-    }
-
-    const settlementHeader = Buffer.from(JSON.stringify(settleData)).toString("base64");
 
     return {
-      authorized: true,
-      mode: "x402",
-      payer: decoded?.payload?.authorization?.from || null,
-      txHash: settleData.txHash || settleData.transaction || null,
-      settlementHeader,
+      authorized: false,
+      statusCode: 402,
+      challenge: {
+        ...challenge,
+        error: lastError,
+      },
+      challengeHeader: headerBase64,
     };
   } catch (err) {
     return {
