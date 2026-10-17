@@ -28,9 +28,13 @@ import {
 } from "./x402.js";
 
 const PORT = Number(process.env.PORT || 4020);
+const TELEMETRY_GIST_ID = process.env.TELEMETRY_GIST_ID || "";
+const TELEMETRY_GH_TOKEN = process.env.TELEMETRY_GH_TOKEN || "";
 
 export const TELEMETRY = {
   started_at_utc: new Date().toISOString(),
+  updated_at_utc: new Date().toISOString(),
+  persistent_cloud_sync: Boolean(TELEMETRY_GIST_ID && TELEMETRY_GH_TOKEN),
   total_requests: 0,
   mcp_discoveries: 0,
   mcp_teaser_previews: 0,
@@ -40,7 +44,123 @@ export const TELEMETRY = {
   recent_events: [],
 };
 
-function recordTelemetry(type, route, req, detail = "") {
+let telemetryCloudLoadedAt = 0;
+
+export async function ensureTelemetryLoaded(force = false) {
+  if (!TELEMETRY_GIST_ID || !TELEMETRY_GH_TOKEN) return;
+  if (!force && Date.now() - telemetryCloudLoadedAt < 15_000) return;
+
+  try {
+    const res = await fetch(`https://api.github.com/gists/${TELEMETRY_GIST_ID}`, {
+      headers: {
+        Authorization: `Bearer ${TELEMETRY_GH_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "AgentKiosk-Telemetry/2.5",
+      },
+      signal: AbortSignal.timeout(2200),
+    });
+    if (!res.ok) return;
+    const gist = await res.json();
+    const raw = gist?.files?.["agent-kiosk-telemetry.json"]?.content;
+    if (!raw) return;
+    const cloud = JSON.parse(raw);
+
+    if (cloud.first_started_at_utc) {
+      TELEMETRY.started_at_utc = cloud.first_started_at_utc;
+    }
+    TELEMETRY.total_requests = Math.max(TELEMETRY.total_requests, Number(cloud.total_requests || 0));
+    TELEMETRY.mcp_discoveries = Math.max(
+      TELEMETRY.mcp_discoveries,
+      Number(cloud.mcp_discoveries || 0)
+    );
+    TELEMETRY.mcp_teaser_previews = Math.max(
+      TELEMETRY.mcp_teaser_previews,
+      Number(cloud.mcp_teaser_previews || 0)
+    );
+    TELEMETRY.x402_challenges_issued = Math.max(
+      TELEMETRY.x402_challenges_issued,
+      Number(cloud.x402_challenges_issued || 0)
+    );
+    TELEMETRY.paid_calls_succeeded = Math.max(
+      TELEMETRY.paid_calls_succeeded,
+      Number(cloud.paid_calls_succeeded || 0)
+    );
+
+    for (const [r, stats] of Object.entries(cloud.by_route || {})) {
+      const local = TELEMETRY.by_route[r] || { challenges: 0, teasers: 0, paid: 0 };
+      TELEMETRY.by_route[r] = {
+        challenges: Math.max(local.challenges || 0, Number(stats.challenges || 0)),
+        teasers: Math.max(local.teasers || 0, Number(stats.teasers || 0)),
+        paid: Math.max(local.paid || 0, Number(stats.paid || 0)),
+      };
+    }
+
+    const seenIds = new Set();
+    const mergedEvents = [];
+    for (const ev of [...TELEMETRY.recent_events, ...(cloud.recent_events || [])]) {
+      const key = ev.id || `${ev.time_utc}:${ev.type}:${ev.route}:${ev.user_agent}`;
+      if (!seenIds.has(key)) {
+        seenIds.add(key);
+        mergedEvents.push({ ...ev, id: key });
+      }
+    }
+    mergedEvents.sort((a, b) => String(b.time_utc).localeCompare(String(a.time_utc)));
+    TELEMETRY.recent_events = mergedEvents.slice(0, 100);
+    telemetryCloudLoadedAt = Date.now();
+  } catch {
+    // Non-blocking fallback to in-memory
+  }
+}
+
+async function flushTelemetryToCloud() {
+  if (!TELEMETRY_GIST_ID || !TELEMETRY_GH_TOKEN) return;
+  try {
+    await ensureTelemetryLoaded(false);
+    TELEMETRY.updated_at_utc = new Date().toISOString();
+    const snapshot = {
+      first_started_at_utc: TELEMETRY.started_at_utc,
+      updated_at_utc: TELEMETRY.updated_at_utc,
+      total_requests: TELEMETRY.total_requests,
+      mcp_discoveries: TELEMETRY.mcp_discoveries,
+      mcp_teaser_previews: TELEMETRY.mcp_teaser_previews,
+      x402_challenges_issued: TELEMETRY.x402_challenges_issued,
+      paid_calls_succeeded: TELEMETRY.paid_calls_succeeded,
+      by_route: TELEMETRY.by_route,
+      recent_events: TELEMETRY.recent_events.slice(0, 100),
+    };
+    await fetch(`https://api.github.com/gists/${TELEMETRY_GIST_ID}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${TELEMETRY_GH_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "User-Agent": "AgentKiosk-Telemetry/2.5",
+      },
+      body: JSON.stringify({
+        files: {
+          "agent-kiosk-telemetry.json": {
+            content: JSON.stringify(snapshot, null, 2),
+          },
+        },
+      }),
+      signal: AbortSignal.timeout(2200),
+    });
+    telemetryCloudLoadedAt = Date.now();
+  } catch {
+    // Ignore network timeouts
+  }
+}
+
+async function recordTelemetry(type, route, req, detail = "") {
+  await ensureTelemetryLoaded(false);
+  TELEMETRY.total_requests += 1;
+  if (type === "x402_challenge") TELEMETRY.x402_challenges_issued += 1;
+  if (type === "mcp_get" || type === "mcp_init" || type === "mcp_tools_list") {
+    TELEMETRY.mcp_discoveries += 1;
+  }
+  if (type === "mcp_teaser") TELEMETRY.mcp_teaser_previews += 1;
+  if (type === "paid_call") TELEMETRY.paid_calls_succeeded += 1;
+
   if (route) {
     if (!TELEMETRY.by_route[route]) {
       TELEMETRY.by_route[route] = { challenges: 0, teasers: 0, paid: 0 };
@@ -49,17 +169,24 @@ function recordTelemetry(type, route, req, detail = "") {
     if (type === "mcp_teaser") TELEMETRY.by_route[route].teasers += 1;
     if (type === "paid_call") TELEMETRY.by_route[route].paid += 1;
   }
-  const ua = String(req?.headers?.["user-agent"] || "unknown-agent").slice(0, 70);
+  const ua = String(req?.headers?.["user-agent"] || "unknown-agent").slice(0, 80);
+  const country = String(req?.headers?.["x-vercel-ip-country"] || "GLOBAL").toUpperCase();
+  const nowIso = new Date().toISOString();
+  const id = `${nowIso}-${Math.random().toString(36).slice(2, 7)}`;
+
   TELEMETRY.recent_events.unshift({
-    time_utc: new Date().toISOString(),
+    id,
+    time_utc: nowIso,
     type,
     route: route || req?.url || "/",
     detail,
+    country,
     user_agent: ua,
   });
-  if (TELEMETRY.recent_events.length > 25) {
-    TELEMETRY.recent_events.length = 25;
+  if (TELEMETRY.recent_events.length > 100) {
+    TELEMETRY.recent_events.length = 100;
   }
+  await flushTelemetryToCloud();
 }
 
 const FAVICON_ICO = Buffer.from(
@@ -643,6 +770,7 @@ export function createAppServer() {
 
     // 0b. Live Telemetry & On-Chain Base USDC Wallet Dashboard: GET /stats & GET /v1/stats
     if (req.method === "GET" && (pathname === "/stats" || pathname === "/v1/stats")) {
+      await ensureTelemetryLoaded(true);
       let walletData = null;
       try {
         walletData = await withCache(`stats:wallet:${CONFIG.payToWallet}`, 30_000, () =>
@@ -680,7 +808,7 @@ export function createAppServer() {
       const eventRows = TELEMETRY.recent_events
         .map(
           (ev) =>
-            `<tr><td>${ev.time_utc.slice(11, 19)} UTC</td><td><code>${ev.type}</code></td><td><code>${ev.route}</code></td><td>${ev.user_agent}</td></tr>`
+            `<tr><td>${String(ev.time_utc || "").replace("T", " ").slice(0, 19)} UTC</td><td><code>${ev.country || "GLOBAL"}</code></td><td><code>${ev.type}</code></td><td><code>${ev.route}</code>${ev.detail ? ` <span style="color:#94a3b8;font-size:12px;">(${ev.detail})</span>` : ""}</td><td>${ev.user_agent}</td></tr>`
         )
         .join("");
 
@@ -690,11 +818,11 @@ export function createAppServer() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agent Kiosk — Canlı Satış & Bot Trafik Paneli</title>
+  <title>Agent Kiosk — Canlı Satış & Kalıcı Bot Trafik Paneli</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b0f19; color:#e2e8f0; max-width:1080px; margin:0 auto; padding:32px 20px; line-height:1.6; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b0f19; color:#e2e8f0; max-width:1120px; margin:0 auto; padding:32px 20px; line-height:1.6; }
     h1, h2 { color:#fff; }
-    .cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin:20px 0; }
+    .cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:14px; margin:20px 0; }
     .card { background:#111827; border:1px solid #1f2937; border-radius:10px; padding:16px; }
     .card .lbl { color:#94a3b8; font-size:13px; }
     .card .val { color:#38bdf8; font-size:26px; font-weight:700; margin-top:4px; }
@@ -706,8 +834,8 @@ export function createAppServer() {
   </style>
 </head>
 <body>
-  <p><a href="/">← Ana Sayfaya Dön (19 Araç)</a> | <a href="/v1/stats">JSON Verisi (/v1/stats)</a></p>
-  <h1>📊 Agent Kiosk — Canlı Cüzdan & Bot Trafik Paneli (v2.5.0)</h1>
+  <p><a href="/">← Ana Sayfaya Dön (19 Araç)</a> | <a href="/v1/stats">JSON Verisi (/v1/stats)</a> | <span style="color:#34d399;font-weight:600;">☁️ Kalıcı Bulut Kaydı: ${TELEMETRY.persistent_cloud_sync ? "Aktif (Asla Sıfırlanmaz)" : "Yerel"}</span></p>
+  <h1>📊 Agent Kiosk — Canlı Cüzdan & Kalıcı Bot Trafik Paneli (v2.5.0)</h1>
   <p>Cüzdan: <code>${CONFIG.payToWallet}</code> (<a href="https://basescan.org/address/${CONFIG.payToWallet}#tokentxns" target="_blank">BaseScan USDC İşlemleri ↗</a>)</p>
   <div class="cards">
     <div class="card"><div class="lbl">Base USDC Bakiyesi</div><div class="val">$${statsPayload.onchain_wallet.base_usdc_balance} USDC</div></div>
@@ -722,10 +850,10 @@ export function createAppServer() {
     <thead><tr><th>Uç Nokta</th><th>Fiyat</th><th>MCP Tadımlık</th><th>402 İstemi</th><th>Ödenen Çağrı</th></tr></thead>
     <tbody>${routeRows}</tbody>
   </table>
-  <h2>Son Gelen 25 Bot İsteği (Canlı Akış)</h2>
+  <h2>Son Gelen 100 Bot İsteği (Kalıcı Bulut Geçmişi)</h2>
   <table>
-    <thead><tr><th>Saat</th><th>Tür</th><th>Uç Nokta / Araç</th><th>Bot (User-Agent)</th></tr></thead>
-    <tbody>${eventRows || '<tr><td colspan="4">Henüz istek kaydı yok.</td></tr>'}</tbody>
+    <thead><tr><th>Tarih & Saat (UTC)</th><th>Ülke</th><th>Tür</th><th>Uç Nokta / Araç</th><th>Bot (User-Agent)</th></tr></thead>
+    <tbody>${eventRows || '<tr><td colspan="5">Henüz istek kaydı yok.</td></tr>'}</tbody>
   </table>
 </body>
 </html>`);
@@ -1036,8 +1164,7 @@ export function createAppServer() {
       const auth = await verifyAndSettlePayment(req, pathname, resourceUrl);
 
       if (!auth.authorized) {
-        TELEMETRY.x402_challenges_issued += 1;
-        recordTelemetry("x402_challenge", pathname, req);
+        await recordTelemetry("x402_challenge", pathname, req, `$${PRICING[pathname]?.priceUsd || "0.02"} USDC`);
         return sendJson(res, auth.statusCode, auth.challenge, {
           "PAYMENT-REQUIRED": auth.challengeHeader,
         });
@@ -1051,8 +1178,7 @@ export function createAppServer() {
         const data = await ROUTE_HANDLERS[pathname](body, auth);
         const attestation = attestResponse(pathname, data);
 
-        TELEMETRY.paid_calls_succeeded += 1;
-        recordTelemetry("paid_call", pathname, req, auth.mode);
+        await recordTelemetry("paid_call", pathname, req, auth.mode);
 
         const extraHeaders = auth.settlementHeader
           ? {
@@ -1080,8 +1206,7 @@ export function createAppServer() {
 
     // 5a. MCP HTTP GET Discovery / Health Check
     if (req.method === "GET" && pathname === "/mcp") {
-      TELEMETRY.mcp_discoveries += 1;
-      recordTelemetry("mcp_get", "/mcp", req);
+      await recordTelemetry("mcp_get", "/mcp", req, "endpoint check");
       return sendJson(res, 200, {
         name: "agent-kiosk",
         version: "2.5.0",
@@ -1101,8 +1226,7 @@ export function createAppServer() {
         const { id, method, params } = rpc;
 
         if (method === "initialize") {
-          TELEMETRY.mcp_discoveries += 1;
-          recordTelemetry("mcp_init", "/mcp", req);
+          await recordTelemetry("mcp_init", "/mcp", req, params?.clientInfo?.name || "mcp-client");
           const requestedVersion = params?.protocolVersion;
           const supportedVersions = ["2024-11-05", "2025-03-26", "2025-06-18"];
           const negotiatedVersion = supportedVersions.includes(requestedVersion)
@@ -1133,8 +1257,7 @@ export function createAppServer() {
         }
 
         if (method === "tools/list") {
-          TELEMETRY.mcp_discoveries += 1;
-          recordTelemetry("mcp_tools_list", "/mcp", req);
+          await recordTelemetry("mcp_tools_list", "/mcp", req, "19 tools indexed");
           return sendJson(res, 200, {
             jsonrpc: "2.0",
             id,
@@ -1187,8 +1310,7 @@ export function createAppServer() {
           const auth = await verifyAndSettlePayment(req, mappedRoute, `${baseUrl}${mappedRoute}`);
 
           if (!auth.authorized && hasPaymentAttempt) {
-            TELEMETRY.x402_challenges_issued += 1;
-            recordTelemetry("x402_challenge", mappedRoute, req, "mcp-failed-sig");
+            await recordTelemetry("x402_challenge", mappedRoute, req, `mcp-failed-sig:${toolName}`);
             return sendJson(res, 402, auth.challenge, {
               "PAYMENT-REQUIRED": auth.challengeHeader,
             });
@@ -1197,8 +1319,7 @@ export function createAppServer() {
           if (!auth.authorized) {
             // Freemium Teaser Mode for MCP (Smithery / Cursor / Claude):
             // Returns HTTP 200 OK with 1 teaser item + exact x402 USDC payment instructions to unlock full data
-            TELEMETRY.mcp_teaser_previews += 1;
-            recordTelemetry("mcp_teaser", mappedRoute, req, toolName);
+            await recordTelemetry("mcp_teaser", mappedRoute, req, toolName);
 
             const teaserArgs = { ...args, limit: 2, max_length: 600 };
             const rawPreview = await ROUTE_HANDLERS[mappedRoute](teaserArgs, null);
@@ -1266,8 +1387,7 @@ export function createAppServer() {
 
           const output = await ROUTE_HANDLERS[mappedRoute](args, auth);
           const attestation = attestResponse(mappedRoute, output);
-          TELEMETRY.paid_calls_succeeded += 1;
-          recordTelemetry("paid_call", mappedRoute, req, `mcp:${auth.mode}`);
+          await recordTelemetry("paid_call", mappedRoute, req, `mcp:${auth.mode}:${toolName}`);
 
           const extraHeaders = auth.settlementHeader
             ? {
