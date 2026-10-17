@@ -723,10 +723,16 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
       rawPayload.authorization = authObj;
     }
 
+    const isOwnerSiftah =
+      req.headers["x-siftah-mode"] === "1" &&
+      String(rawPayload?.authorization?.from || "").toLowerCase() ===
+        CONFIG.payToWallet.toLowerCase();
+    const effectiveAmount = isOwnerSiftah ? "1000" : route.amount;
+
     const cleanV2Requirements = {
       scheme: "exact",
       network: CONFIG.network,
-      amount: route.amount,
+      amount: effectiveAmount,
       asset: CONFIG.usdcAsset,
       payTo: CONFIG.payToWallet,
       maxTimeoutSeconds: 60,
@@ -736,7 +742,7 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
     const cleanV1Requirements = {
       scheme: "exact",
       network: "base",
-      maxAmountRequired: route.amount,
+      maxAmountRequired: effectiveAmount,
       resource:
         (typeof decoded.resource === "string" ? decoded.resource : decoded.resource?.url) ||
         resourceUrl,
@@ -761,6 +767,7 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
                 ? decoded.resource
                 : challenge.resource,
             accepted: cleanV2Requirements,
+            extensions: decoded.extensions || challenge.extensions,
             payload: rawPayload,
           }
         : {

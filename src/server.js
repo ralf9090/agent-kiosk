@@ -720,7 +720,7 @@ function sendJson(res, statusCode, payload, extraHeaders = {}) {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers":
-      "Content-Type, PAYMENT-SIGNATURE, X-PAYMENT, X-PAYMENT-SIGNATURE, X-API-KEY, Authorization, Mcp-Session-Id, Last-Event-Id",
+      "Content-Type, PAYMENT-SIGNATURE, X-PAYMENT, X-PAYMENT-SIGNATURE, X-API-KEY, X-Siftah-Mode, Authorization, Mcp-Session-Id, Last-Event-Id",
     "Access-Control-Expose-Headers":
       "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, Mcp-Session-Id",
     ...extraHeaders,
@@ -1095,7 +1095,7 @@ export function createAppServer() {
   </style>
 </head>
 <body>
-  <p><a href="/">← Ana Sayfaya Dön (19 Araç)</a> | <a href="/v1/stats">JSON Verisi (/v1/stats)</a> | <span style="color:#34d399;font-weight:600;">☁️ Kalıcı Bulut Kaydı: ${TELEMETRY.persistent_cloud_sync ? "Aktif (Asla Sıfırlanmaz)" : "Yerel"}</span></p>
+  <p><a href="/">← Ana Sayfaya Dön (19 Araç)</a> | <a href="/siftah">⚡ Tek Tıkla Siftah Yap (/siftah)</a> | <a href="/v1/stats">JSON Verisi (/v1/stats)</a> | <span style="color:#34d399;font-weight:600;">☁️ Kalıcı Bulut Kaydı: ${TELEMETRY.persistent_cloud_sync ? "Aktif (Asla Sıfırlanmaz)" : "Yerel"}</span></p>
   <h1>📊 Agent Kiosk — Canlı Cüzdan & Kalıcı Bot Trafik Paneli (v2.5.0)</h1>
   <p>Cüzdan: <code>${CONFIG.payToWallet}</code> (<a href="https://basescan.org/address/${CONFIG.payToWallet}#tokentxns" target="_blank">BaseScan USDC İşlemleri ↗</a>)</p>
   <div class="cards">
@@ -1116,6 +1116,203 @@ export function createAppServer() {
     <thead><tr><th>Tarih & Saat (UTC)</th><th>Ülke</th><th>Tür</th><th>Uç Nokta / Araç</th><th>Bot (User-Agent)</th></tr></thead>
     <tbody>${eventRows || '<tr><td colspan="5">Henüz istek kaydı yok.</td></tr>'}</tbody>
   </table>
+</body>
+</html>`);
+    }
+
+    // 0c. 1-Click Browser Wallet x402 Siftah & Bazaar Activation Page: GET /siftah
+    if (req.method === "GET" && pathname === "/siftah") {
+      const allRoutesJson = JSON.stringify(Object.keys(PRICING));
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(`<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Kiosk — Tek Tıkla $0.001 USDC Siftah & Bazaar Aktivasyonu</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b0f19; color:#e2e8f0; max-width:860px; margin:0 auto; padding:32px 20px; line-height:1.6; }
+    h1, h2 { color:#fff; }
+    .box { background:#111827; border:1px solid #1f2937; border-radius:12px; padding:22px; margin:18px 0; }
+    .btn { display:inline-block; background:#0284c7; color:#fff; border:none; padding:12px 20px; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; margin-right:10px; margin-bottom:10px; }
+    .btn:hover { background:#0369a1; }
+    .btn-green { background:#059669; }
+    .btn-green:hover { background:#047857; }
+    code { background:#1e293b; color:#38bdf8; padding:2px 6px; border-radius:4px; }
+    a { color:#38bdf8; text-decoration:none; }
+    #log { background:#090d16; border:1px solid #1e293b; border-radius:8px; padding:14px; font-family:monospace; font-size:13px; white-space:pre-wrap; min-height:120px; color:#a7f3d0; }
+  </style>
+</head>
+<body>
+  <p><a href="/stats">← Canlı İstatistik Paneline Dön (/stats)</a> | <a href="/">Ana Sayfa</a></p>
+  <h1>⚡ Agent Kiosk — Tek Tıkla Siftah & Bazaar Aktivasyonu</h1>
+  <div class="box">
+    <p><strong>Nasıl Çalışır? (Net Maliyet: $0.00 — Gas Ücreti: $0.00)</strong></p>
+    <ul>
+      <li>Dükkan Cüzdanı: <code>${CONFIG.payToWallet}</code></li>
+      <li>Cüzdanında <strong>Base Ağı (Chain ID: 8453)</strong> üzerinde en az <strong>$0.001 USDC</strong> (1 cent bile fazlasıyla yeter) olduğunda aşağıdaki butonla gerçek bir x402 ödemesi imzalarsın.</li>
+      <li><strong>ETH Gas Ücreti Yoktur ($0):</strong> EIP-3009 imzasını blokzincire Facilitator ücretsiz gönderir.</li>
+      <li><strong>Bakiyen Azalmaz:</strong> Ödediğin $0.001 USDC doğrudan yine <code>${CONFIG.payToWallet}</code> cüzdanına geri yatar; ama işlem blokzincire ve <strong>x402scan / Coinbase Bazaar</strong> vitrinine gerçek satış olarak kaydedilir.</li>
+    </ul>
+    <button class="btn" onclick="connectWallet()">1. Cüzdanı Bağla (MetaMask / Coinbase / Rabby)</button>
+    <button class="btn btn-green" onclick="runSiftah(['/v1/ping'])">⚡ 2. Tek Siftah Gönder (/v1/ping — $0.001 USDC)</button>
+    <button class="btn btn-green" onclick="runSiftah(ALL_ROUTES)">🚀 3. Tüm 19 Servisi Sırayla Aktifleştir ($0.001 x 19)</button>
+    <p id="walletStatus" style="color:#94a3b8;margin-top:8px;">Durum: Cüzdan henüz bağlanmadı.</p>
+  </div>
+  <h2>Canlı İşlem Kaydı</h2>
+  <div id="log">Hazır. Önce "1. Cüzdanı Bağla" butonuna tıklayın...</div>
+
+  <script>
+    const PAY_TO = "${CONFIG.payToWallet}";
+    const USDC_ADDRESS = "${CONFIG.usdcAsset}";
+    const ALL_ROUTES = ${allRoutesJson};
+    let currentAccount = null;
+
+    function logMsg(msg) {
+      const el = document.getElementById("log");
+      el.textContent += "\\n" + msg;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function randomBytes32Hex() {
+      const arr = new Uint8Array(32);
+      crypto.getRandomValues(arr);
+      return "0x" + Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    async function connectWallet() {
+      if (!window.ethereum) {
+        alert("Tarayıcıda MetaMask, Rabby veya Coinbase Wallet bulunamadı.");
+        return;
+      }
+      try {
+        const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+        currentAccount = accounts[0];
+        try {
+          await window.ethereum.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: "0x2105" }],
+          });
+        } catch (switchErr) {
+          if (switchErr.code === 4902) {
+            await window.ethereum.request({
+              method: "wallet_addEthereumChain",
+              params: [{
+                chainId: "0x2105",
+                chainName: "Base Mainnet",
+                nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+                rpcUrls: ["https://mainnet.base.org"],
+                blockExplorerUrls: ["https://basescan.org"]
+              }]
+            });
+          }
+        }
+        document.getElementById("walletStatus").innerHTML = "Bağlı Cüzdan: <code>" + currentAccount + "</code> (Base Mainnet)";
+        logMsg("✅ Cüzdan bağlandı: " + currentAccount);
+      } catch (err) {
+        logMsg("❌ Cüzdan bağlantı hatası: " + err.message);
+      }
+    }
+
+    async function signAndCallRoute(routePath) {
+      if (!currentAccount) await connectWallet();
+      if (!currentAccount) return;
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      const validAfter = "0";
+      const validBefore = String(nowSec + 3600);
+      const nonce = randomBytes32Hex();
+      const value = "1000"; // $0.001 USDC
+
+      const typedData = {
+        types: {
+          EIP712Domain: [
+            { name: "name", type: "string" },
+            { name: "version", type: "string" },
+            { name: "chainId", type: "uint256" },
+            { name: "verifyingContract", type: "address" }
+          ],
+          TransferWithAuthorization: [
+            { name: "from", type: "address" },
+            { name: "to", type: "address" },
+            { name: "value", type: "uint256" },
+            { name: "validAfter", type: "uint256" },
+            { name: "validBefore", type: "uint256" },
+            { name: "nonce", type: "bytes32" }
+          ]
+        },
+        domain: {
+          name: "USD Coin",
+          version: "2",
+          chainId: 8453,
+          verifyingContract: USDC_ADDRESS
+        },
+        primaryType: "TransferWithAuthorization",
+        message: {
+          from: currentAccount,
+          to: PAY_TO,
+          value,
+          validAfter,
+          validBefore,
+          nonce
+        }
+      };
+
+      logMsg("✍️ " + routePath + " için $0.001 USDC EIP-3009 imzası isteniyor...");
+      const signature = await window.ethereum.request({
+        method: "eth_signTypedData_v4",
+        params: [currentAccount, JSON.stringify(typedData)]
+      });
+
+      const paymentPayload = {
+        x402Version: 2,
+        scheme: "exact",
+        network: "eip155:8453",
+        payload: {
+          signature,
+          authorization: {
+            from: currentAccount,
+            to: PAY_TO,
+            value,
+            validAfter,
+            validBefore,
+            nonce
+          }
+        }
+      };
+
+      const b64Header = btoa(JSON.stringify(paymentPayload));
+      logMsg("🚀 " + routePath + " uç noktasına ödeme başlığı gönderiliyor...");
+
+      const res = await fetch(routePath, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Siftah-Mode": "1",
+          "PAYMENT-SIGNATURE": b64Header
+        },
+        body: JSON.stringify({ message: "siftah-x402", query: "AERO", address: PAY_TO, domain: "stripe.com", url: "https://example.com", name: "lodash" })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        logMsg("🎉 BAŞARILI! " + routePath + " onaylandı! TxHash: " + (data.tx_hash || "Facilitator onayladı"));
+      } else {
+        logMsg("⚠️ " + routePath + " yanıtı (" + res.status + "): " + JSON.stringify(data.error || data));
+      }
+    }
+
+    async function runSiftah(routes) {
+      for (const r of routes) {
+        try {
+          await signAndCallRoute(r);
+        } catch (e) {
+          logMsg("❌ Hata (" + r + "): " + e.message);
+          break;
+        }
+      }
+    }
+  </script>
 </body>
 </html>`);
     }
