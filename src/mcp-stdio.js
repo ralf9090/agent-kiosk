@@ -136,7 +136,7 @@ rl.on("line", async (line) => {
         result: {
           protocolVersion: negotiatedVersion,
           capabilities: { tools: {}, resources: {}, prompts: {} },
-          serverInfo: { name: "agent-kiosk", version: "2.5.0" },
+          serverInfo: { name: "agent-kiosk", version: "2.6.0" },
         },
       });
     }

@@ -1018,7 +1018,7 @@ export function renderMcpPrompt(name, args = {}) {
 export const MCP_RESOURCES = [
   {
     uri: "kiosk://catalog/pricing",
-    name: "Agent Kiosk 19-in-1 x402 Pricing & Endpoint Catalog",
+    name: "Agent Kiosk 23-in-1 x402 Pricing & Endpoint Catalog",
     description:
       "Complete machine-readable catalog of all 19 attested x402 Base USDC endpoints, MCP tool mappings, and JSON schemas.",
     mimeType: "application/json",
@@ -1059,7 +1059,7 @@ export function readMcpResource(uri, baseUrl = "https://agent-kiosk.vercel.app")
           text: JSON.stringify(
             {
               service: "Agent Kiosk",
-              version: "2.5.0",
+              version: "2.6.0",
               network: CONFIG.network,
               asset: CONFIG.usdcAsset,
               payTo: CONFIG.payToWallet,
@@ -1169,7 +1169,7 @@ export function createAppServer() {
       const baseChain = walletData?.chains?.find((c) => c.chain === "base") || null;
       const statsPayload = {
         service: "Agent Kiosk",
-        version: "2.5.0",
+        version: "2.6.0",
         pay_to_wallet: CONFIG.payToWallet,
         onchain_wallet: {
           base_usdc_balance: baseChain?.usdc_balance ?? 0,
@@ -1221,7 +1221,7 @@ export function createAppServer() {
 </head>
 <body>
   <p><a href="/">← Ana Sayfaya Dön (19 Araç)</a> | <a href="/siftah">⚡ Tek Tıkla Siftah Yap (/siftah)</a> | <a href="/v1/stats">JSON Verisi (/v1/stats)</a> | <span style="color:#34d399;font-weight:600;">☁️ Kalıcı Bulut Kaydı: ${TELEMETRY.persistent_cloud_sync ? "Aktif (Asla Sıfırlanmaz)" : "Yerel"}</span></p>
-  <h1>📊 Agent Kiosk — Canlı Cüzdan & Kalıcı Bot Trafik Paneli (v2.5.0)</h1>
+  <h1>📊 Agent Kiosk — Canlı Cüzdan & Kalıcı Bot Trafik Paneli (v2.6.0)</h1>
   <p>Cüzdan: <code>${CONFIG.payToWallet}</code> (<a href="https://basescan.org/address/${CONFIG.payToWallet}#tokentxns" target="_blank">BaseScan USDC İşlemleri ↗</a>)</p>
   <div class="cards">
     <div class="card"><div class="lbl">Base USDC Bakiyesi</div><div class="val">$${statsPayload.onchain_wallet.base_usdc_balance} USDC</div></div>
@@ -1582,7 +1582,7 @@ export function createAppServer() {
     if (req.method === "GET" && pathname === "/llms.txt") {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
       const lines = [
-        "# Agent Kiosk — 19-in-1 Autonomous B2A Data, Action Calldata, Compliance & Security Supermarket (x402 v2 & MCP)",
+        "# Agent Kiosk — 23-in-1 Autonomous B2A Data, Action Calldata, Compliance & Security Supermarket (x402 v2 & MCP)",
         "",
         "> No sign-up, no monthly subscription. Autonomous AI agents can query 19 specialized attested tools (including $0.001 wallet ping, 12 core APIs, $0.05 DeFi Swap/Bridge Calldata Builder, $0.05 AML/OFAC Compliance Screening, 3 $0.10 360-dossiers, and $5.00 30-day VIP API Pass) using HTTP x402 v2 (Base USDC) or Model Context Protocol (MCP).",
         "",
@@ -1642,12 +1642,12 @@ export function createAppServer() {
       return sendJson(res, 200, {
         protocolVersion: "0.3.0",
         schemaVersion: "1.0",
-        name: "Agent Kiosk — 19-in-1 B2A Intelligence, Action & x402 API",
+        name: "Agent Kiosk — 23-in-1 B2A Intelligence, Action & x402 API",
         description:
-          "19-in-1 Autonomous B2A Intelligence, Executable DeFi Swap/Bridge Calldata Builder, AML/OFAC Compliance Screening, Token 360 Verdicts, Whale Portfolio Radar, and B2B Lead Dossiers settled in Base USDC via x402 v2 and MCP.",
+          "23-in-1 Autonomous B2A Intelligence, Executable DeFi Swap/Bridge Calldata Builder, AML/OFAC Compliance Screening, Token 360 Verdicts, Whale Portfolio Radar, and B2B Lead Dossiers settled in Base USDC via x402 v2 and MCP.",
         url: `${baseUrl}/mcp`,
         preferredTransport: "JSONRPC",
-        version: "2.5.0",
+        version: "2.6.0",
         provider: {
           organization: "Agent Kiosk",
           url: "https://github.com/ralf9090/agent-kiosk",
@@ -1695,10 +1695,10 @@ export function createAppServer() {
       return sendJson(res, 200, {
         mcpVersion: "2024-11-05",
         name: "io.github.ralf9090/agent-kiosk",
-        title: "Agent Kiosk — 19-in-1 B2A Intelligence, Action & Compliance x402 API",
-        version: "2.5.0",
+        title: "Agent Kiosk — 23-in-1 B2A Intelligence, Action & Compliance x402 API",
+        version: "2.6.0",
         description:
-          "19-in-1 autonomous intelligence & action MCP server & x402 API: Executable DeFi Swap/Bridge Calldata, AML/OFAC Wallet Compliance, Token Due Diligence, B2B Company Dossier, Whale Alpha Radar, smart contract security audit, prediction markets, DeFi yields, B2B leads, research, and 30-day Prepaid API Pass.",
+          "23-in-1 autonomous intelligence & action MCP server & x402 API: Executable DeFi Swap/Bridge Calldata, AML/OFAC Wallet Compliance, Token Due Diligence, B2B Company Dossier, Whale Alpha Radar, smart contract security audit, prediction markets, DeFi yields, B2B leads, research, and 30-day Prepaid API Pass.",
         endpoints: {
           streamableHttp: `${baseUrl}/mcp`,
           smithery: "https://agent-kiosk--batuhansenavci.run.tools",
@@ -1715,7 +1715,7 @@ export function createAppServer() {
         name_for_human: "Agent Kiosk",
         name_for_model: "agent_kiosk",
         description_for_human:
-          "19-in-1 B2A Intelligence, Action Calldata & Compliance API & MCP Server via x402 (Base USDC).",
+          "23-in-1 B2A Intelligence, Action Calldata & Compliance API & MCP Server via x402 (Base USDC).",
         description_for_model:
           "Build executable DeFi swap/bridge calldata, screen wallets for AML/OFAC sanctions, query 360-degree token/company/whale dossiers, social discussions, local business leads, clean web markdown, 0x contract honeypot audits, DEX buy/sell order-flow alpha, prediction market odds, DeFi yields, domain DNS/SaaS intelligence, package CVE checks, academic papers, and GitHub stats.",
         auth: { type: "none" },
@@ -1757,9 +1757,9 @@ export function createAppServer() {
         openapi: "3.1.0",
         info: {
           title: "Agent Kiosk B2A API",
-          version: "2.5.0",
+          version: "2.6.0",
           description:
-            "19-in-1 Pay-Per-Call Intelligence, Action Calldata & Compliance Supermarket for AI Agents: DeFi Swap/Bridge Calldata Builder, AML/OFAC Sanctions Screening, Token 360 Due Diligence, B2B Company Dossier, Whale Alpha Radar, Social Search, Business Leads, Clean Web Extraction, Smart Contract Security, DeFi Order-Flow Alpha, Whale Wallet Profiler, Prediction Markets, DeFi Yields, Domain Intelligence, Package CVE Audits, Academic Research, GitHub Intelligence, 30-Day Prepaid Pass, and x402 Ping via x402 v2 (Base USDC) and MCP.",
+            "23-in-1 Pay-Per-Call Intelligence, Action Calldata & Compliance Supermarket for AI Agents: DeFi Swap/Bridge Calldata Builder, AML/OFAC Sanctions Screening, Token 360 Due Diligence, B2B Company Dossier, Whale Alpha Radar, Social Search, Business Leads, Clean Web Extraction, Smart Contract Security, DeFi Order-Flow Alpha, Whale Wallet Profiler, Prediction Markets, DeFi Yields, Domain Intelligence, Package CVE Audits, Academic Research, GitHub Intelligence, 30-Day Prepaid Pass, and x402 Ping via x402 v2 (Base USDC) and MCP.",
           contact: {
             name: "Agent Kiosk Support",
             email: "ralf9090@users.noreply.github.com",
@@ -1870,7 +1870,7 @@ export function createAppServer() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agent Kiosk — 19-in-1 x402 v2 & MCP Intelligence, Action & Compliance API</title>
+  <title>Agent Kiosk — 23-in-1 x402 v2 & MCP Intelligence, Action & Compliance API</title>
   <meta name="description" content="Instant pay-per-call B2A data, DeFi Swap/Bridge Calldata Builder, AML/OFAC Compliance Screening, Token 360 Due Diligence, B2B Dossiers, Whale Portfolio Radar, and B2B leads via x402 (Base USDC) and MCP." />
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b0f19; color:#e2e8f0; max-width:1040px; margin:0 auto; padding:32px 20px; line-height:1.6; }
@@ -1884,7 +1884,7 @@ export function createAppServer() {
   </style>
 </head>
 <body>
-  <h1>⚡ Agent Kiosk — 19-in-1 Autonomous B2A Intelligence, Action & Compliance Supermarket</h1>
+  <h1>⚡ Agent Kiosk — 23-in-1 Autonomous B2A Intelligence, Action & Compliance Supermarket</h1>
   <p>No API keys, no sign-ups, no monthly subscriptions. Built for autonomous AI agents paying per request via <strong>x402 v2 (Base USDC)</strong> or connecting via <strong>Model Context Protocol (MCP)</strong>.</p>
   <div class="badges">
     <a href="https://www.x402scan.com/server/a1af2789-615a-4324-b3f1-83b97834ece8">🔵 x402scan (19/19 Verified)</a>
@@ -1920,11 +1920,11 @@ export function createAppServer() {
     ) {
       return sendJson(res, 200, {
         name: "Agent Kiosk",
-        version: "2.5.0",
+        version: "2.6.0",
         x402Version: 2,
         attested: true,
         description:
-          "19-in-1 Autonomous B2A Data, Executable DeFi Calldata, AML Compliance & Security Supermarket via x402 v2 (Base USDC) and MCP.",
+          "23-in-1 Autonomous B2A Data, Executable DeFi Calldata, AML Compliance & Security Supermarket via x402 v2 (Base USDC) and MCP.",
         protocols: ["x402", "mcp", "rest"],
         payment: {
           network: CONFIG.network,
@@ -2019,7 +2019,7 @@ export function createAppServer() {
       await recordTelemetry("mcp_get", "/mcp", req, "endpoint check");
       return sendJson(res, 200, {
         name: "agent-kiosk",
-        version: "2.5.0",
+        version: "2.6.0",
         protocol: "mcp-streamable-http",
         protocolVersion: "2024-11-05",
         attested: true,
@@ -2049,7 +2049,7 @@ export function createAppServer() {
             result: {
               protocolVersion: negotiatedVersion,
               capabilities: { tools: {}, resources: {}, prompts: {} },
-              serverInfo: { name: "agent-kiosk", version: "2.5.0" },
+              serverInfo: { name: "agent-kiosk", version: "2.6.0" },
             },
           });
         }

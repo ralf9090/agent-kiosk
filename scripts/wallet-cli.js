@@ -55,20 +55,36 @@ async function getUsdcBalance(rpcUrl, usdcAddress, walletAddress) {
   return BigInt(res?.result || "0x0");
 }
 
+async function getEthBalance(rpcUrl, walletAddress) {
+  const res = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_getBalance",
+      params: [walletAddress, "latest"],
+    }),
+  }).then((r) => r.json());
+  return BigInt(res?.result || "0x0");
+}
+
 async function cmdStatus() {
   const account = getAccount();
   const baseRaw = await getUsdcBalance(
-    "https://mainnet.base.org",
+    "https://base-rpc.publicnode.com",
     "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     account.address
   );
+  const baseEthRaw = await getEthBalance("https://base-rpc.publicnode.com", account.address);
   const ethRaw = await getUsdcBalance(
     "https://ethereum-rpc.publicnode.com",
     "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     account.address
   );
   console.log("💳 Cüzdan:", account.address);
-  console.log("🔵 Base USDC:", (Number(baseRaw) / 1e6).toFixed(4), "USDC");
+  console.log("🔵 Base USDC (Ana Para):", (Number(baseRaw) / 1e6).toFixed(4), "USDC");
+  console.log("⛽ Base ETH (Gas Yakıtı):", (Number(baseEthRaw) / 1e18).toFixed(6), "ETH");
   console.log("⚪ Ethereum USDC:", (Number(ethRaw) / 1e6).toFixed(4), "USDC");
 }
 
