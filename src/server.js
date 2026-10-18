@@ -2083,7 +2083,7 @@ export function createAppServer() {
         }
 
         if (method === "tools/list") {
-          await recordTelemetry("mcp_tools_list", "/mcp", req, "19 tools indexed");
+          await recordTelemetry("mcp_tools_list", "/mcp", req, `${MCP_TOOLS.length} tools indexed`);
           return sendJson(res, 200, {
             jsonrpc: "2.0",
             id,
