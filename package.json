@@ -9,7 +9,7 @@
     "agent-kiosk-mcp": "./src/mcp-stdio.js"
   },
   "scripts": {
-    "build": "node --check src/mcp-stdio.js && mkdir -p public",
+    "build": "node --check src/mcp-stdio.js && mkdir -p public && cp .wellknown-verify public/",
     "start": "node src/server.js",
     "mcp": "node src/mcp-stdio.js",
     "test": "node test/verify.js"
