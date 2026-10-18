@@ -34,6 +34,7 @@ import {
   perpFundingArbitrage,
   tradfiMacroRadar,
   kalshiPolymarketArb,
+  llmChatCompletions,
 } from "./providers.js";
 
 const HANDLERS = {
@@ -55,6 +56,7 @@ const HANDLERS = {
   perp_funding_arbitrage: perpFundingArbitrage,
   tradfi_macro_radar: tradfiMacroRadar,
   kalshi_polymarket_arb: kalshiPolymarketArb,
+  llm_chat_completions: llmChatCompletions,
   token_due_diligence: tokenDueDiligence,
   b2b_company_dossier: b2bCompanyDossier,
   whale_alpha_radar: whaleAlphaRadar,
@@ -99,6 +101,7 @@ const TOOL_TO_ROUTE = {
   perp_funding_arbitrage: "/v1/funding-rates",
   tradfi_macro_radar: "/v1/macro-radar",
   kalshi_polymarket_arb: "/v1/prediction-arb",
+  llm_chat_completions: "/v1/chat/completions",
   token_due_diligence: "/v1/token-due-diligence",
   b2b_company_dossier: "/v1/b2b-company-dossier",
   whale_alpha_radar: "/v1/whale-alpha-radar",

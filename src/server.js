@@ -21,6 +21,7 @@ import {
   perpFundingArbitrage,
   tradfiMacroRadar,
   kalshiPolymarketArb,
+  llmChatCompletions,
   withCache,
 } from "./providers.js";
 import {
@@ -666,9 +667,31 @@ export const MCP_TOOLS = [
     },
   },
   {
+    name: "llm_chat_completions",
+    description:
+      "OpenAI-compatible LLM Chat Completions Gateway ($0.002 USDC/call). Drop-in replacement for /v1/chat/completions settled in Base USDC via x402 with zero account or API key required.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: {
+          type: "string",
+          description: "User prompt or question for the LLM",
+        },
+        messages: {
+          type: "array",
+          description: "Optional OpenAI-format messages array [{role: 'user', content: '...'}]",
+        },
+        model: {
+          type: "string",
+          description: "Model alias (default: 'gpt-4o-mini')",
+        },
+      },
+    },
+  },
+  {
     name: "buy_prepaid_pass",
     description:
-      "Mint a 30-Day Prepaid API Key Pass (ak_live_...) for $5.00 USDC on Base via x402. Unlocks all 22 Agent Kiosk REST & MCP intelligence tools for 30 days via the X-API-KEY header without per-call x402 signing (ideal for LangChain, n8n, Make.com, OpenAI Actions, and Python/JS bots).",
+      "Mint a 30-Day Prepaid API Key Pass (ak_live_...) for $5.00 USDC on Base via x402. Unlocks all 23 Agent Kiosk REST & MCP intelligence tools for 30 days via the X-API-KEY header without per-call x402 signing (ideal for LangChain, n8n, Make.com, OpenAI Actions, and Python/JS bots).",
     inputSchema: {
       type: "object",
       properties: {
@@ -807,6 +830,7 @@ const ROUTE_HANDLERS = {
   "/v1/funding-rates": perpFundingArbitrage,
   "/v1/macro-radar": tradfiMacroRadar,
   "/v1/prediction-arb": kalshiPolymarketArb,
+  "/v1/chat/completions": llmChatCompletions,
   "/v1/buy-pass": buyPassHandler,
 };
 
@@ -833,6 +857,7 @@ const TOOL_TO_ROUTE = {
   perp_funding_arbitrage: "/v1/funding-rates",
   tradfi_macro_radar: "/v1/macro-radar",
   kalshi_polymarket_arb: "/v1/prediction-arb",
+  llm_chat_completions: "/v1/chat/completions",
   buy_prepaid_pass: "/v1/buy-pass",
 };
 
@@ -1977,7 +2002,19 @@ export function createAppServer() {
       }
     }
 
-    // 4. Paid x402 v2/v1 Endpoints (all 19 routes)
+    // 3b. OpenAI-Compatible Free Models Discovery (/v1/models)
+    if (req.method === "GET" && pathname === "/v1/models") {
+      return sendJson(res, 200, {
+        object: "list",
+        data: [
+          { id: "gpt-4o-mini", object: "model", created: 1715000000, owned_by: "agent-kiosk-x402", price_usdc: "0.002" },
+          { id: "openai", object: "model", created: 1715000000, owned_by: "agent-kiosk-x402", price_usdc: "0.002" },
+          { id: "deepseek-chat", object: "model", created: 1715000000, owned_by: "agent-kiosk-x402", price_usdc: "0.002" },
+        ],
+      });
+    }
+
+    // 4. Paid x402 v2/v1 Endpoints (all 24 routes)
     if ((req.method === "POST" || req.method === "GET") && ROUTE_HANDLERS[pathname]) {
       const resourceUrl = `${baseUrl}${pathname}`;
       const auth = await verifyAndSettlePayment(req, pathname, resourceUrl);
@@ -2017,6 +2054,7 @@ export function createAppServer() {
           res,
           200,
           {
+            ...(pathname === "/v1/chat/completions" && data && typeof data === "object" ? data : {}),
             ok: true,
             payment_mode: auth.mode,
             tx_hash: auth.txHash || undefined,

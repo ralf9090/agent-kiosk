@@ -623,11 +623,62 @@ export const PRICING = {
       ],
     },
   },
+  "/v1/chat/completions": {
+    priceUsd: "0.002",
+    amount: "2000", // 0.002 USDC
+    description:
+      "OpenAI-compatible LLM Chat Completions Gateway ($0.002 USDC/call). Drop-in replacement for /v1/chat/completions — change base_url to https://agent-kiosk.vercel.app/v1 and pay per request in Base USDC via x402 with zero account or API key setup.",
+    mimeType: "application/json",
+    tags: [
+      "llm",
+      "openai",
+      "chat-completions",
+      "inference",
+      "gpt",
+      "ai-gateway",
+      "agents",
+      "x402",
+    ],
+    exampleInput: {
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: "Summarize Base L2 DeFi yields in 2 sentences." }],
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        model: {
+          type: "string",
+          description: "Model identifier (e.g. gpt-4o-mini, openai, deepseek-chat)",
+        },
+        messages: {
+          type: "array",
+          description: "OpenAI-format messages array [{role: 'user', content: '...'}]",
+        },
+        prompt: {
+          type: "string",
+          description: "Optional shorthand prompt string if messages array is omitted",
+        },
+        temperature: { type: "number", description: "Sampling temperature (0.0 - 2.0)" },
+      },
+    },
+    exampleOutput: {
+      id: "chatcmpl_x402",
+      object: "chat.completion",
+      model: "gpt-4o-mini",
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: "Base L2 offers top USDC lending yields on Morpho and Aave v3." },
+          finish_reason: "stop",
+        },
+      ],
+    },
+  },
   "/v1/buy-pass": {
     priceUsd: "5.00",
     amount: "5000000", // 5.00 USDC
     description:
-      "Instant 30-Day Prepaid API Key Pass (ak_live_...) for AI agents, LangChain, n8n, Make.com, and developers. Unlocks all 22 Agent Kiosk REST & MCP intelligence tools for 30 days via X-API-KEY header without per-call x402 signing.",
+      "Instant 30-Day Prepaid API Key Pass (ak_live_...) for AI agents, LangChain, n8n, Make.com, and developers. Unlocks all 23 Agent Kiosk REST & MCP intelligence tools for 30 days via X-API-KEY header without per-call x402 signing.",
     mimeType: "application/json",
     tags: ["prepaid", "api-key", "pass", "subscription", "access", "agents", "mcp", "attested"],
     exampleInput: { agent_name: "my-autonomous-agent" },
