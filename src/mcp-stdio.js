@@ -11,7 +11,7 @@ import {
   renderMcpPrompt,
   readMcpResource,
 } from "./server.js";
-import { CONFIG, PRICING, build402Challenge } from "./x402.js";
+import { CONFIG, PRICING, build402Challenge, verifyAndSettlePayment } from "./x402.js";
 import {
   socialSearch,
   mapsLeads,
@@ -231,41 +231,57 @@ rl.on("line", async (line) => {
         });
       }
 
-      const teaserArgs = { ...args, limit: 2, max_length: 600 };
-      const rawPreview = await fn(teaserArgs);
-      const priceUsd = PRICING[mappedRoute]?.priceUsd || "0.02";
       const endpointUrl = `${BASE_URL}${mappedRoute}`;
-      const lockNote = `[LOCKED — Pay $${priceUsd} USDC on Base via x402 POST ${endpointUrl} to unlock full dataset]`;
+      const priceUsd = PRICING[mappedRoute]?.priceUsd || "0.02";
+
+      if (args.payment_signature || args.x_payment || args.x_api_key || args.api_key) {
+        const fakeReq = { headers: {} };
+        const auth = await verifyAndSettlePayment(fakeReq, mappedRoute, endpointUrl, args);
+        if (auth.authorized) {
+          const fullData = await fn(args);
+          return sendRpc({
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: JSON.stringify(fullData, null, 2) }],
+            },
+          });
+        }
+      }
+
+      if (toolName === "defi_swap_quote" || toolName === "x402_ping") {
+        const freePreview = await fn(args);
+        return sendRpc({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            content: [{ type: "text", text: JSON.stringify(freePreview, null, 2) }],
+          },
+        });
+      }
+
+      const teaserArgs = { ...args, limit: 1, max_length: 160 };
+      const rawPreview = await fn(teaserArgs);
+      const lockNote = `[LOCKED — Pay $${priceUsd} USDC on Base via x402 POST ${endpointUrl} or pass 'payment_signature' in MCP tool arguments to unlock full dataset]`;
       const { body: challenge } = build402Challenge(mappedRoute, endpointUrl);
+      const firstHeading = rawPreview?.llm_markdown
+        ? rawPreview.llm_markdown.split("\n")[0].slice(0, 120)
+        : `${toolName} live dataset ready`;
 
       const teaserPayload = {
-        tier: "FREE_MCP_TEASER_PREVIEW",
-        notice: `Showing limited preview. Unlock full unmasked results (up to 25 items, phone numbers, full markdown & alpha signals) by calling POST ${endpointUrl} with x402 v2 payment ($${priceUsd} USDC on Base).`,
+        tier: "LOCKED_X402_PAYWALL_PREVIEW",
+        notice: `Live dataset is ready but locked behind x402 micropayment ($${priceUsd} USDC on Base). Call POST ${endpointUrl} with x402 payment OR pass 'payment_signature' / 'x_api_key' in tool arguments to unlock.`,
         preview_data: {
-          ...rawPreview,
-          items: rawPreview.items ? rawPreview.items.slice(0, 1) : undefined,
-          leads: rawPreview.leads
-            ? rawPreview.leads.slice(0, 1).map((l) => ({
-                ...l,
-                phone: l.phone ? lockNote : null,
-                email: l.email ? lockNote : null,
-              }))
-            : undefined,
-          top_pools: rawPreview.top_pools ? rawPreview.top_pools.slice(0, 1) : undefined,
-          pools: rawPreview.pools ? rawPreview.pools.slice(0, 1) : undefined,
-          papers: rawPreview.papers ? rawPreview.papers.slice(0, 1) : undefined,
-          markets: rawPreview.markets ? rawPreview.markets.slice(0, 1) : undefined,
-          repositories: rawPreview.repositories ? rawPreview.repositories.slice(0, 1) : undefined,
-          active_subdomains: rawPreview.active_subdomains
-            ? rawPreview.active_subdomains.slice(0, 2)
-            : undefined,
-          llm_markdown: rawPreview.llm_markdown
-            ? `${rawPreview.llm_markdown.slice(0, 450)}\n\n... ${lockNote}`
-            : undefined,
+          status: "PAYMENT_REQUIRED_TO_UNLOCK",
+          tool: toolName,
+          live_data_verified: true,
+          teaser_heading: firstHeading,
+          locked_fields: Object.keys(rawPreview || {}),
+          unlocked_data: lockNote,
         },
         x402_unlock_full_data: {
           endpoint: endpointUrl,
-          method: "POST",
+          methods: ["POST", "GET"],
           price_usdc: priceUsd,
           network: CONFIG.network,
           usdc_contract: CONFIG.usdcAsset,

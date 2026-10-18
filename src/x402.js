@@ -774,10 +774,29 @@ export function build402Challenge(routePath, resourceUrl) {
         scheme: "exact",
         network: CONFIG.network,
         amount: route.amount,
+        maxAmountRequired: route.amount,
         asset: CONFIG.usdcAsset,
         payTo: CONFIG.payToWallet,
         maxTimeoutSeconds: 60,
         resource: resourceUrl,
+        description: route.description,
+        mimeType: route.mimeType,
+        extra: {
+          name: "USD Coin",
+          version: "2",
+        },
+      },
+      {
+        scheme: "exact",
+        network: "base",
+        maxAmountRequired: route.amount,
+        amount: route.amount,
+        asset: CONFIG.usdcAsset,
+        payTo: CONFIG.payToWallet,
+        maxTimeoutSeconds: 60,
+        resource: resourceUrl,
+        description: route.description,
+        mimeType: route.mimeType,
         extra: {
           name: "USD Coin",
           version: "2",
@@ -837,11 +856,13 @@ export function build402Challenge(routePath, resourceUrl) {
 /**
  * Verify AND settle incoming x402 v2/v1 payment header across Base Mainnet facilitators
  */
-export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
+export async function verifyAndSettlePayment(req, routePath, resourceUrl, extraAuthArgs = {}) {
   // 1. Check explicit API_SECRET_KEY or signed 30-day Prepaid Pass (ak_live_...)
-  const providedKey = (
+  const providedKey = String(
     req.headers["x-api-key"] ||
-    (req.headers["authorization"] || "").replace(/^Bearer\s+/i, "")
+      extraAuthArgs?.x_api_key ||
+      extraAuthArgs?.api_key ||
+      (req.headers["authorization"] || "").replace(/^Bearer\s+/i, "")
   ).trim();
 
   if (CONFIG.apiSecretKey && providedKey && providedKey === CONFIG.apiSecretKey) {
@@ -860,11 +881,13 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl) {
     }
   }
 
-  // 2. Require x402 PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header
+  // 2. Require x402 PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header (or MCP argument)
   const paymentHeader =
     req.headers["payment-signature"] ||
     req.headers["x-payment"] ||
-    req.headers["x-payment-signature"];
+    req.headers["x-payment-signature"] ||
+    extraAuthArgs?.payment_signature ||
+    extraAuthArgs?.x_payment;
   const { body: challenge, headerBase64 } = build402Challenge(routePath, resourceUrl);
 
   if (!paymentHeader) {

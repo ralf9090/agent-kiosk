@@ -695,6 +695,22 @@ export const MCP_TOOLS = [
   },
 ].map((tool) => ({
   ...tool,
+  inputSchema: {
+    ...tool.inputSchema,
+    properties: {
+      ...(tool.inputSchema?.properties || {}),
+      payment_signature: {
+        type: "string",
+        description:
+          "Optional x402 v2/v1 Base64 or JSON EIP-3009 USDC payment signature to unlock the full unmasked dataset directly via MCP",
+      },
+      x_api_key: {
+        type: "string",
+        description:
+          "Optional ak_live_... 30-day Prepaid API Pass key to unlock the full unmasked dataset",
+      },
+    },
+  },
   annotations: {
     title: tool.name
       .split("_")
@@ -2147,9 +2163,16 @@ export function createAppServer() {
           const hasPaymentAttempt = Boolean(
             req.headers["payment-signature"] ||
               req.headers["x-payment"] ||
-              req.headers["x-payment-signature"]
+              req.headers["x-payment-signature"] ||
+              args.payment_signature ||
+              args.x_payment
           );
-          const auth = await verifyAndSettlePayment(req, mappedRoute, `${baseUrl}${mappedRoute}`);
+          const auth = await verifyAndSettlePayment(
+            req,
+            mappedRoute,
+            `${baseUrl}${mappedRoute}`,
+            args
+          );
 
           if (!auth.authorized && hasPaymentAttempt) {
             await recordTelemetry("x402_challenge", mappedRoute, req, `mcp-failed-sig:${toolName}`);
@@ -2159,58 +2182,76 @@ export function createAppServer() {
           }
 
           if (!auth.authorized) {
-            // Freemium Teaser Mode for MCP (Smithery / Cursor / Claude):
-            // Returns HTTP 200 OK with 1 teaser item + exact x402 USDC payment instructions to unlock full data
             await recordTelemetry("mcp_teaser", mappedRoute, req, toolName);
 
-            const teaserArgs = { ...args, limit: 2, max_length: 600 };
-            const rawPreview = await ROUTE_HANDLERS[mappedRoute](teaserArgs, null);
             const priceUsd = PRICING[mappedRoute]?.priceUsd || "0.02";
-            const lockNote = `[LOCKED — Pay $${priceUsd} USDC on Base via x402 POST ${baseUrl}${mappedRoute} OR use a $5.00 30-Day Prepaid Pass (POST ${baseUrl}/v1/buy-pass) to unlock full dataset]`;
+            const lockNote = `[LOCKED — Pay $${priceUsd} USDC on Base via x402 (POST/GET ${baseUrl}${mappedRoute} or pass 'payment_signature' in MCP tool arguments) OR use a $5.00 30-Day Prepaid Pass (POST ${baseUrl}/v1/buy-pass) to unlock full live dataset]`;
+
+            // Only defi_swap_quote (earns 25bps on-chain fee) and x402_ping return unmasked data without x402 payment
+            if (toolName === "defi_swap_quote" || toolName === "x402_ping") {
+              const freePreview = await ROUTE_HANDLERS[mappedRoute](args, null);
+              return sendJson(
+                res,
+                200,
+                {
+                  jsonrpc: "2.0",
+                  id,
+                  result: {
+                    content: [
+                      {
+                        type: "text",
+                        text: JSON.stringify(
+                          {
+                            tier:
+                              toolName === "defi_swap_quote"
+                                ? "FREE_EXECUTABLE_SWAP_WITH_25BPS_PARTNER_FEE"
+                                : "FREE_PING_PREVIEW",
+                            data: freePreview,
+                            attestation: attestResponse(mappedRoute, freePreview),
+                          },
+                          null,
+                          2
+                        ),
+                      },
+                    ],
+                  },
+                },
+                { "PAYMENT-REQUIRED": auth.challengeHeader }
+              );
+            }
+
+            const teaserArgs = { ...args, limit: 1, max_length: 160 };
+            const rawPreview = await ROUTE_HANDLERS[mappedRoute](teaserArgs, null);
+            const firstHeading = rawPreview?.llm_markdown
+              ? rawPreview.llm_markdown.split("\n")[0].slice(0, 120)
+              : `${toolName} live dataset ready`;
+
+            const lockedPreviewData = {
+              status: "PAYMENT_REQUIRED_TO_UNLOCK",
+              tool: toolName,
+              live_data_verified: true,
+              teaser_heading: firstHeading,
+              locked_fields: Object.keys(rawPreview || {}),
+              unlocked_data: lockNote,
+            };
 
             const teaserPayload = {
-              tier:
-                toolName === "defi_swap_quote"
-                  ? "FREE_EXECUTABLE_SWAP_WITH_25BPS_PARTNER_FEE"
-                  : "FREE_MCP_TEASER_PREVIEW",
-              notice:
-                toolName === "defi_swap_quote"
-                  ? "Full executable swap/bridge calldata provided for FREE (includes 0.25% on-chain partner fee to Agent Kiosk)."
-                  : `Showing limited preview. Unlock full unmasked results by calling POST ${baseUrl}${mappedRoute} with x402 payment ($${priceUsd} USDC on Base) OR mint a 30-day X-API-KEY pass ($5.00 USDC at POST ${baseUrl}/v1/buy-pass).`,
-              preview_data: {
-                ...rawPreview,
-                items: rawPreview.items ? rawPreview.items.slice(0, 1) : undefined,
-                leads: rawPreview.leads
-                  ? rawPreview.leads.slice(0, 1).map((l) => ({
-                      ...l,
-                      phone: l.phone ? lockNote : null,
-                      email: l.email ? lockNote : null,
-                    }))
-                  : undefined,
-                top_pools: rawPreview.top_pools ? rawPreview.top_pools.slice(0, 1) : undefined,
-                pools: rawPreview.pools ? rawPreview.pools.slice(0, 1) : undefined,
-                papers: rawPreview.papers ? rawPreview.papers.slice(0, 1) : undefined,
-                markets: rawPreview.markets ? rawPreview.markets.slice(0, 1) : undefined,
-                repositories: rawPreview.repositories ? rawPreview.repositories.slice(0, 1) : undefined,
-                active_subdomains: rawPreview.active_subdomains
-                  ? rawPreview.active_subdomains.slice(0, 2)
-                  : undefined,
-                transaction_request: rawPreview.transaction_request || undefined,
-                llm_markdown:
-                  toolName === "defi_swap_quote"
-                    ? rawPreview.llm_markdown
-                    : rawPreview.llm_markdown
-                    ? `${rawPreview.llm_markdown.slice(0, 450)}\n\n... ${lockNote}`
-                    : undefined,
-              },
-              attestation: attestResponse(mappedRoute, rawPreview),
+              tier: "LOCKED_X402_PAYWALL_PREVIEW",
+              notice: `Live dataset is ready but locked behind x402 micropayment ($${priceUsd} USDC on Base). To unlock full unmasked JSON, send x402 payment to ${baseUrl}${mappedRoute} OR pass 'payment_signature' / 'x_api_key' in this MCP tool's arguments.`,
+              preview_data: lockedPreviewData,
+              attestation: attestResponse(mappedRoute, {
+                locked: true,
+                fields: lockedPreviewData.locked_fields,
+              }),
               x402_unlock_full_data: {
                 endpoint: `${baseUrl}${mappedRoute}`,
-                method: "POST",
+                methods: ["POST", "GET"],
                 price_usdc: priceUsd,
                 network: CONFIG.network,
                 usdc_contract: CONFIG.usdcAsset,
                 pay_to_wallet: CONFIG.payToWallet,
+                mcp_direct_unlock:
+                  "Pass 'payment_signature' (Base64 x402 payload) or 'x_api_key' (ak_live_...) directly in tool arguments",
                 prepaid_30d_pass_endpoint: `${baseUrl}/v1/buy-pass`,
                 prepaid_30d_pass_price_usdc: "5.00",
                 payment_required_challenge: auth.challenge,
