@@ -2135,5 +2135,626 @@ export async function defiSwapQuote(params = {}) {
   });
 }
 
+const RPC_BY_CHAIN = {
+  base: {
+    chainId: 8453,
+    name: "Base Mainnet",
+    rpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com"],
+  },
+  ethereum: {
+    chainId: 1,
+    name: "Ethereum Mainnet",
+    rpcs: ["https://ethereum-rpc.publicnode.com", "https://eth.llamarpc.com"],
+  },
+  arbitrum: {
+    chainId: 42161,
+    name: "Arbitrum One",
+    rpcs: ["https://arb1.arbitrum.io/rpc", "https://arbitrum-one-rpc.publicnode.com"],
+  },
+  optimism: {
+    chainId: 10,
+    name: "OP Mainnet",
+    rpcs: ["https://mainnet.optimism.io", "https://optimism-rpc.publicnode.com"],
+  },
+  polygon: {
+    chainId: 137,
+    name: "Polygon PoS",
+    rpcs: ["https://polygon-bor-rpc.publicnode.com"],
+  },
+};
+
+async function callEvmRpc(rpcs, method, params = []) {
+  for (const url of rpcs) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: AbortSignal.timeout(4500),
+      });
+      if (!res.ok) continue;
+      const json = await res.json();
+      if (json.error) {
+        return { ok: false, error: json.error, rpc: url };
+      }
+      return { ok: true, result: json.result, rpc: url };
+    } catch {
+      // try fallback RPC
+    }
+  }
+  return { ok: false, error: { message: "All RPC endpoints timed out" } };
+}
+
+function decodeRevertData(hexData) {
+  if (!hexData || typeof hexData !== "string" || !hexData.startsWith("0x")) return null;
+  // Error(string) selector: 0x08c379a0
+  if (hexData.startsWith("0x08c379a0") && hexData.length >= 138) {
+    try {
+      const lenHex = hexData.slice(74, 138);
+      const strLen = parseInt(lenHex, 16);
+      const strHex = hexData.slice(138, 138 + strLen * 2);
+      return Buffer.from(strHex, "hex").toString("utf8");
+    } catch {
+      return hexData;
+    }
+  }
+  return hexData;
+}
+
+/**
+ * 18. Pre-Flight EVM Transaction Simulator, Gas Estimator, ERC-20 Allowance & Proxy Detector ($0.005 USDC)
+ * Modeled on the #1 highest-volume x402 agent primitive category (140-176 unique paying agents/month).
+ */
+export async function evmTxSimulator(params = {}) {
+  const chainKey = String(params.chain || "base").toLowerCase().trim();
+  const chainCfg = RPC_BY_CHAIN[chainKey] || RPC_BY_CHAIN.base;
+  const from = String(
+    params.from || params.sender || "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95"
+  ).trim();
+  const to = String(
+    params.to || params.target || params.contract || "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+  ).trim();
+  const data = String(params.data || params.calldata || "0x18160ddd").trim(); // default totalSupply()
+  const valueHex =
+    params.value && String(params.value).startsWith("0x")
+      ? String(params.value)
+      : params.value
+        ? "0x" + BigInt(params.value).toString(16)
+        : "0x0";
+  const txHash = params.tx_hash || params.txHash || null;
+  const spender = params.spender || null;
+  const token = params.token || null;
+
+  const txObj = { from, to, data, value: valueHex };
+  const EIP1967_IMPL_SLOT =
+    "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+
+  const [blockRes, gasPriceRes, callRes, estGasRes, codeRes, implSlotRes, receiptRes] =
+    await Promise.all([
+      callEvmRpc(chainCfg.rpcs, "eth_blockNumber", []),
+      callEvmRpc(chainCfg.rpcs, "eth_gasPrice", []),
+      callEvmRpc(chainCfg.rpcs, "eth_call", [txObj, "latest"]),
+      callEvmRpc(chainCfg.rpcs, "eth_estimateGas", [txObj]),
+      callEvmRpc(chainCfg.rpcs, "eth_getCode", [to, "latest"]),
+      callEvmRpc(chainCfg.rpcs, "eth_getStorageAt", [to, EIP1967_IMPL_SLOT, "latest"]),
+      txHash
+        ? callEvmRpc(chainCfg.rpcs, "eth_getTransactionReceipt", [txHash])
+        : Promise.resolve(null),
+    ]);
+
+  let allowanceInfo = null;
+  if (token && spender && /^0x[a-fA-F0-9]{40}$/.test(from) && /^0x[a-fA-F0-9]{40}$/.test(spender)) {
+    const ownerPadded = from.slice(2).toLowerCase().padStart(64, "0");
+    const spenderPadded = spender.slice(2).toLowerCase().padStart(64, "0");
+    const allowanceCalldata = `0xdd62ed3e${ownerPadded}${spenderPadded}`;
+    const allowRes = await callEvmRpc(chainCfg.rpcs, "eth_call", [
+      { to: token, data: allowanceCalldata },
+      "latest",
+    ]);
+    if (allowRes.ok && allowRes.result && allowRes.result !== "0x") {
+      const rawAllow = BigInt(allowRes.result);
+      allowanceInfo = {
+        token,
+        owner: from,
+        spender,
+        allowance_raw: rawAllow.toString(),
+        has_approval: rawAllow > 0n,
+        is_unlimited: rawAllow > 10n ** 50n,
+      };
+    }
+  }
+
+  const blockNumber = blockRes.ok && blockRes.result ? parseInt(blockRes.result, 16) : null;
+  const gasPriceWei = gasPriceRes.ok && gasPriceRes.result ? BigInt(gasPriceRes.result) : 10000000n;
+  const gasPriceGwei = Number(gasPriceWei) / 1e9;
+  const estimatedGas =
+    estGasRes.ok && estGasRes.result ? parseInt(estGasRes.result, 16) : 21000;
+  const gasCostEth = (Number(gasPriceWei) * estimatedGas) / 1e18;
+  const gasCostUsd = Number((gasCostEth * 2600).toFixed(6));
+
+  const willRevert = !callRes.ok || !estGasRes.ok;
+  const rawError = callRes.error || estGasRes.error || null;
+  const revertReason = rawError
+    ? decodeRevertData(rawError.data) || rawError.message || "Execution reverted"
+    : null;
+
+  const bytecode = codeRes.ok ? codeRes.result || "0x" : "0x";
+  const isContract = bytecode.length > 2;
+  const rawImplSlot = implSlotRes.ok ? implSlotRes.result || "0x" : "0x";
+  const proxyImpl =
+    rawImplSlot.length === 66 && !/^0x0+$/.test(rawImplSlot)
+      ? `0x${rawImplSlot.slice(26)}`
+      : null;
+
+  const verdict = willRevert ? "REVERT_WARNING_DO_NOT_BROADCAST" : "SAFE_TO_BROADCAST";
+
+  const llm_markdown = [
+    `# EVM Pre-Flight Simulation (${chainCfg.name} — Chain ${chainCfg.chainId})`,
+    `- **Verdict:** **${verdict}**`,
+    `- **Target (\`to\`):** \`${to}\` (${isContract ? `Smart Contract, ${(bytecode.length - 2) / 2} bytes` : "EOA Wallet"}${proxyImpl ? `, EIP-1967 Proxy -> \`${proxyImpl}\`` : ""})`,
+    `- **Simulation (\`eth_call\`):** ${willRevert ? `REVERTED (${revertReason})` : `SUCCESS (return data: \`${String(callRes.result || "0x").slice(0, 66)}\`)`}`,
+    `- **Estimated Gas:** \`${estimatedGas.toLocaleString()}\` units @ \`${gasPriceGwei.toFixed(4)} Gwei\` (~$${gasCostUsd} USD)`,
+  ].join("\n");
+
+  return {
+    chain: chainKey,
+    chain_id: chainCfg.chainId,
+    block_number: blockNumber,
+    verdict,
+    simulation: {
+      will_revert: willRevert,
+      revert_reason: revertReason,
+      return_data: callRes.ok ? callRes.result : null,
+      estimated_gas: estimatedGas,
+      gas_price_gwei: Number(gasPriceGwei.toFixed(5)),
+      estimated_fee_eth: Number(gasCostEth.toFixed(8)),
+      estimated_fee_usd: gasCostUsd,
+    },
+    target_contract: {
+      address: to,
+      is_contract: isContract,
+      bytecode_size_bytes: isContract ? (bytecode.length - 2) / 2 : 0,
+      is_eip1967_proxy: Boolean(proxyImpl),
+      proxy_implementation: proxyImpl,
+    },
+    allowance_check: allowanceInfo,
+    tx_receipt: receiptRes?.ok ? receiptRes.result : null,
+    llm_markdown,
+  };
+}
+
+/**
+ * 19. Cross-Exchange Perpetual Funding Rate Arbitrage & Crowded Positioning Radar ($0.008 USDC)
+ * Modeled on the 50-unique-payers/mo /funding-rates x402 bestseller.
+ * Compares live perpetual funding rates & open interest across Hyperliquid and dYdX v4.
+ */
+export async function perpFundingArbitrage(params = {}) {
+  const symbolFilter = String(params.symbol || params.coin || params.ticker || "")
+    .toUpperCase()
+    .replace(/[-_/](USD|USDT|USDC|PERP)$/i, "")
+    .trim();
+  const limit = Math.min(Math.max(Number(params.limit) || 15, 1), 40);
+
+  return withCache(`funding:${symbolFilter || "ALL"}:${limit}`, 45_000, async () => {
+    const [hlData, dydxData] = await Promise.all([
+      fetch("https://api.hyperliquid.xyz/info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
+        body: JSON.stringify({ type: "metaAndAssetCtxs" }),
+        signal: AbortSignal.timeout(6500),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch("https://indexer.dydx.trade/v4/perpetualMarkets", {
+        headers: { "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(6500),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ]);
+
+    const hlMap = new Map();
+    const universe = hlData?.[0]?.universe || [];
+    const ctxs = hlData?.[1] || [];
+    for (let i = 0; i < universe.length; i++) {
+      const u = universe[i];
+      const c = ctxs[i];
+      if (!u || !c || u.isDelisted) continue;
+      const hourlyRate = Number(c.funding || 0);
+      const markPx = Number(c.markPx || c.oraclePx || 0);
+      const oiCoins = Number(c.openInterest || 0);
+      hlMap.set(String(u.name).toUpperCase(), {
+        hourly_pct: hourlyRate * 100,
+        apr_pct: hourlyRate * 24 * 365 * 100,
+        mark_price: markPx,
+        open_interest_usd: Math.round(oiCoins * markPx),
+        volume_24h_usd: Math.round(Number(c.dayNtlVlm || 0)),
+      });
+    }
+
+    const dydxMap = new Map();
+    const dydxMarkets = dydxData?.markets || {};
+    for (const [ticker, m] of Object.entries(dydxMarkets)) {
+      if (!m || m.status !== "ACTIVE") continue;
+      const sym = ticker.split("-")[0].toUpperCase();
+      const hourlyRate = Number(m.nextFundingRate || 0);
+      const price = Number(m.oraclePrice || 0);
+      const oiUsd = Math.round(Number(m.openInterest || 0) * price);
+      dydxMap.set(sym, {
+        hourly_pct: hourlyRate * 100,
+        apr_pct: hourlyRate * 24 * 365 * 100,
+        oracle_price: price,
+        open_interest_usd: oiUsd,
+        volume_24h_usd: Math.round(Number(m.volume24H || 0)),
+      });
+    }
+
+    const allSymbols = new Set([...hlMap.keys(), ...dydxMap.keys()]);
+    const opportunities = [];
+
+    for (const sym of allSymbols) {
+      if (symbolFilter && sym !== symbolFilter) continue;
+      const hl = hlMap.get(sym) || null;
+      const dy = dydxMap.get(sym) || null;
+      const totalOi = (hl?.open_interest_usd || 0) + (dy?.open_interest_usd || 0);
+      if (!symbolFilter && totalOi < 500_000) continue;
+
+      const hlApr = hl ? hl.apr_pct : null;
+      const dyApr = dy ? dy.apr_pct : null;
+      const netSpreadApr =
+        hlApr !== null && dyApr !== null ? Math.abs(hlApr - dyApr) : Math.abs(hlApr ?? dyApr ?? 0);
+
+      let arbStrategy = "SINGLE_VENUE_CARRY";
+      if (hlApr !== null && dyApr !== null) {
+        arbStrategy =
+          hlApr > dyApr
+            ? `SHORT Hyperliquid (${hlApr.toFixed(1)}% APR) / LONG dYdX (${dyApr.toFixed(1)}% APR)`
+            : `LONG Hyperliquid (${hlApr.toFixed(1)}% APR) / SHORT dYdX (${dyApr.toFixed(1)}% APR)`;
+      } else if (hlApr !== null) {
+        arbStrategy =
+          hlApr >= 0
+            ? `SHORT Hyperliquid Perp / LONG Spot (+${hlApr.toFixed(1)}% APR)`
+            : `LONG Hyperliquid Perp / SHORT Spot (+${Math.abs(hlApr).toFixed(1)}% APR)`;
+      }
+
+      const avgApr = hlApr !== null && dyApr !== null ? (hlApr + dyApr) / 2 : (hlApr ?? dyApr ?? 0);
+      const positioning =
+        avgApr > 25 ? "CROWDED_LONGS" : avgApr < -15 ? "CROWDED_SHORTS" : "BALANCED";
+
+      opportunities.push({
+        symbol: sym,
+        price_usd: Number((hl?.mark_price || dy?.oracle_price || 0).toFixed(4)),
+        net_arb_spread_apr_pct: Number(netSpreadApr.toFixed(2)),
+        strategy: arbStrategy,
+        positioning_regime: positioning,
+        total_open_interest_usd: totalOi,
+        venues: {
+          hyperliquid: hl
+            ? {
+                hourly_funding_pct: Number(hl.hourly_pct.toFixed(5)),
+                annualized_apr_pct: Number(hl.apr_pct.toFixed(2)),
+                open_interest_usd: hl.open_interest_usd,
+                volume_24h_usd: hl.volume_24h_usd,
+              }
+            : null,
+          dydx_v4: dy
+            ? {
+                hourly_funding_pct: Number(dy.hourly_pct.toFixed(5)),
+                annualized_apr_pct: Number(dy.apr_pct.toFixed(2)),
+                open_interest_usd: dy.open_interest_usd,
+                volume_24h_usd: dy.volume_24h_usd,
+              }
+            : null,
+        },
+      });
+    }
+
+    opportunities.sort((a, b) => b.net_arb_spread_apr_pct - a.net_arb_spread_apr_pct);
+    const top = opportunities.slice(0, limit);
+
+    const llm_markdown = [
+      `# Cross-Venue Perpetual Funding Rate & Basis Arbitrage Radar`,
+      `- **Markets Scanned:** ${allSymbols.size} perpetual futures across Hyperliquid & dYdX v4`,
+      ...top.slice(0, 8).map(
+        (o, idx) =>
+          `${idx + 1}. **${o.symbol}** ($${o.price_usd}) — Spread: **${o.net_arb_spread_apr_pct}% APR** | ${o.strategy} | OI: $${o.total_open_interest_usd.toLocaleString()}`
+      ),
+    ].join("\n");
+
+    return {
+      symbol_filter: symbolFilter || "ALL",
+      markets_scanned: allSymbols.size,
+      count: top.length,
+      items: top,
+      llm_markdown,
+    };
+  });
+}
+
+async function fetchYahooQuote(ticker, label) {
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const meta = data?.chart?.result?.[0]?.meta;
+    if (!meta || !meta.regularMarketPrice) return null;
+    const price = Number(meta.regularMarketPrice);
+    const prev = Number(meta.chartPreviousClose || meta.previousClose || price);
+    const changePct = prev ? ((price - prev) / prev) * 100 : 0;
+    return {
+      ticker,
+      name: label,
+      price: Number(price.toFixed(2)),
+      change_pct: Number(changePct.toFixed(2)),
+      currency: meta.currency || "USD",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 20. TradFi, Macro & DeFi Capital Flow Intelligence Radar ($0.008 USDC)
+ * Modeled on the 60-unique-payers/mo /tradfi-data & /defi-analytics x402 bestsellers.
+ */
+export async function tradfiMacroRadar(params = {}) {
+  const focus = String(params.focus || "all").toLowerCase();
+
+  return withCache(`macro:${focus}`, 90_000, async () => {
+    const [sp500, nasdaq, vix, dxy, us10y, gold, oil, fngRes, cgGlobal, llamaChains] =
+      await Promise.all([
+        fetchYahooQuote("^GSPC", "S&P 500"),
+        fetchYahooQuote("^IXIC", "Nasdaq Composite"),
+        fetchYahooQuote("^VIX", "CBOE Volatility Index (VIX)"),
+        fetchYahooQuote("DX-Y.NYB", "US Dollar Index (DXY)"),
+        fetchYahooQuote("^TNX", "US 10-Year Treasury Yield"),
+        fetchYahooQuote("GC=F", "Gold Futures (XAU/USD)"),
+        fetchYahooQuote("CL=F", "WTI Crude Oil"),
+        fetch("https://api.alternative.me/fng/?limit=2", {
+          headers: { "User-Agent": USER_AGENT },
+          signal: AbortSignal.timeout(5000),
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+        fetch("https://api.coingecko.com/api/v3/global", {
+          headers: { "User-Agent": USER_AGENT },
+          signal: AbortSignal.timeout(5000),
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+        fetch("https://api.llama.fi/v2/chains", {
+          headers: { "User-Agent": USER_AGENT },
+          signal: AbortSignal.timeout(5500),
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+      ]);
+
+    const fngEntry = fngRes?.data?.[0];
+    const fearGreed = fngEntry
+      ? {
+          value: Number(fngEntry.value),
+          classification: fngEntry.value_classification,
+        }
+      : { value: 50, classification: "Neutral" };
+
+    const cg = cgGlobal?.data || {};
+    const totalCryptoMcapUsd = cg.total_market_cap?.usd
+      ? Math.round(cg.total_market_cap.usd)
+      : null;
+    const btcDominancePct = cg.market_cap_percentage?.btc
+      ? Number(cg.market_cap_percentage.btc.toFixed(2))
+      : null;
+
+    const topChains = Array.isArray(llamaChains)
+      ? llamaChains
+          .filter((c) => c && c.tvl > 0)
+          .sort((a, b) => b.tvl - a.tvl)
+          .slice(0, 8)
+          .map((c) => ({
+            chain: c.name,
+            tvl_usd: Math.round(c.tvl),
+          }))
+      : [];
+
+    const vixVal = vix?.price || 18;
+    const macroRegime =
+      vixVal > 25
+        ? "HIGH_VOLATILITY_RISK_OFF"
+        : vixVal < 16 && (sp500?.change_pct || 0) >= 0
+          ? "LOW_VOL_RISK_ON"
+          : "MACRO_ROTATION_NEUTRAL";
+
+    const tradfiAssets = [sp500, nasdaq, vix, dxy, us10y, gold, oil].filter(Boolean);
+
+    const llm_markdown = [
+      `# Global TradFi, Macro & DeFi Capital Flow Radar`,
+      `- **Macro Regime:** **${macroRegime}** | **Crypto Fear & Greed:** ${fearGreed.value}/100 (${fearGreed.classification})`,
+      `- **Equities & Vol:** S&P 500: ${sp500?.price ?? "N/A"} (${sp500?.change_pct ?? 0}%) | Nasdaq: ${nasdaq?.price ?? "N/A"} | VIX: ${vix?.price ?? "N/A"}`,
+      `- **Rates, FX & Commodities:** DXY: ${dxy?.price ?? "N/A"} | US 10Y Yield: ${us10y?.price ?? "N/A"}% | Gold: $${gold?.price ?? "N/A"} | Oil: $${oil?.price ?? "N/A"}`,
+      `- **Crypto & DeFi Pulse:** Total Market Cap: $${totalCryptoMcapUsd ? (totalCryptoMcapUsd / 1e12).toFixed(2) + "T" : "N/A"} | BTC Dominance: ${btcDominancePct ?? "N/A"}%`,
+    ].join("\n");
+
+    return {
+      macro_regime: macroRegime,
+      fear_and_greed: fearGreed,
+      tradfi_benchmarks: tradfiAssets,
+      crypto_global: {
+        total_market_cap_usd: totalCryptoMcapUsd,
+        btc_dominance_pct: btcDominancePct,
+        market_cap_change_24h_pct: cg.market_cap_change_percentage_24h_usd
+          ? Number(cg.market_cap_change_percentage_24h_usd.toFixed(2))
+          : null,
+      },
+      defi_top_chains_tvl: topChains,
+      llm_markdown,
+    };
+  });
+}
+
+/**
+ * 21. Unified Kalshi + Polymarket + Manifold Prediction Market Arbitrage Scanner ($0.015 USDC)
+ * Modeled on the 41-unique-payers/mo prediction market arbitrage x402 endpoints.
+ */
+export async function kalshiPolymarketArb(params = {}) {
+  const query = String(params.query || params.topic || params.q || "bitcoin").trim();
+  const limit = Math.min(Math.max(Number(params.limit) || 10, 1), 25);
+
+  return withCache(`pred_arb:${query.toLowerCase()}:${limit}`, 60_000, async () => {
+    const [polyEvents, kalshiEvents, manifoldMarkets] = await Promise.all([
+      fetch("https://gamma-api.polymarket.com/events?active=true&closed=false&limit=40", {
+        headers: { "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(6500),
+      })
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+      fetch(
+        "https://api.elections.kalshi.com/trade-api/v2/events?status=open&with_nested_markets=true&limit=30",
+        {
+          headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+          signal: AbortSignal.timeout(4500),
+        }
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch(
+        `https://api.manifold.markets/v0/search-markets?term=${encodeURIComponent(query)}&filter=open&sort=liquidity&limit=15`,
+        {
+          headers: { "User-Agent": USER_AGENT },
+          signal: AbortSignal.timeout(5500),
+        }
+      )
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+    ]);
+
+    const normalized = [];
+    const qLower = query.toLowerCase();
+
+    for (const ev of Array.isArray(polyEvents) ? polyEvents : []) {
+      const m = ev.markets?.[0];
+      if (!m) continue;
+      const title = String(m.question || ev.title || "");
+      let yesProb = 0.5;
+      try {
+        const prices =
+          typeof m.outcomePrices === "string" ? JSON.parse(m.outcomePrices) : m.outcomePrices;
+        if (Array.isArray(prices) && prices.length > 0) yesProb = Number(prices[0]);
+      } catch {
+        // default 0.5
+      }
+      normalized.push({
+        venue: "polymarket",
+        title,
+        yes_probability_pct: Number((yesProb * 100).toFixed(1)),
+        no_probability_pct: Number(((1 - yesProb) * 100).toFixed(1)),
+        volume_usd: Math.round(Number(ev.volume || m.volume || 0)),
+        liquidity_usd: Math.round(Number(ev.liquidity || m.liquidity || 0)),
+        url: `https://polymarket.com/event/${ev.slug || ""}`,
+        matches_query: title.toLowerCase().includes(qLower),
+      });
+    }
+
+    for (const kev of kalshiEvents?.events || []) {
+      const km = kev.markets?.[0];
+      if (!km) continue;
+      const title = String(km.title || kev.title || "");
+      const yesCents = Number(km.yes_ask || km.last_price || 50);
+      normalized.push({
+        venue: "kalshi",
+        ticker: km.ticker || kev.event_ticker,
+        title,
+        yes_probability_pct: Number(yesCents.toFixed(1)),
+        no_probability_pct: Number((100 - yesCents).toFixed(1)),
+        volume_usd: Math.round(Number(km.volume || 0)),
+        liquidity_usd: Math.round(Number(km.liquidity || km.open_interest || 0)),
+        url: `https://kalshi.com/markets/${(kev.series_ticker || kev.event_ticker || "").toLowerCase()}`,
+        matches_query: title.toLowerCase().includes(qLower),
+      });
+    }
+
+    for (const mm of Array.isArray(manifoldMarkets) ? manifoldMarkets : []) {
+      if (!mm || typeof mm.probability !== "number") continue;
+      normalized.push({
+        venue: "manifold",
+        title: String(mm.question || ""),
+        yes_probability_pct: Number((mm.probability * 100).toFixed(1)),
+        no_probability_pct: Number(((1 - mm.probability) * 100).toFixed(1)),
+        volume_usd: Math.round(Number(mm.volume || 0)),
+        liquidity_usd: Math.round(Number(mm.totalLiquidity || 0)),
+        url: mm.url || `https://manifold.markets/${mm.creatorUsername}/${mm.slug}`,
+        matches_query: true,
+      });
+    }
+
+    // Prioritize query matches, then highest volume
+    normalized.sort((a, b) => {
+      if (a.matches_query !== b.matches_query) return a.matches_query ? -1 : 1;
+      return b.volume_usd - a.volume_usd;
+    });
+
+    const selected = normalized.slice(0, limit);
+
+    // Cross-venue keyword overlap arbitrage detector
+    const stopWords = new Set(["will", "the", "in", "by", "to", "of", "for", "on", "be", "before", "above"]);
+    const arbPairs = [];
+    for (let i = 0; i < normalized.length; i++) {
+      for (let j = i + 1; j < normalized.length; j++) {
+        const a = normalized[i];
+        const b = normalized[j];
+        if (a.venue === b.venue) continue;
+        const wordsA = a.title
+          .toLowerCase()
+          .replace(/[^a-z0-9 ]/g, "")
+          .split(/\s+/)
+          .filter((w) => w.length > 3 && !stopWords.has(w));
+        const wordsB = new Set(
+          b.title
+            .toLowerCase()
+            .replace(/[^a-z0-9 ]/g, "")
+            .split(/\s+/)
+            .filter((w) => w.length > 3 && !stopWords.has(w))
+        );
+        const shared = wordsA.filter((w) => wordsB.has(w));
+        if (shared.length >= 2) {
+          const spread = Math.abs(a.yes_probability_pct - b.yes_probability_pct);
+          if (spread >= 1.5) {
+            arbPairs.push({
+              shared_keywords: shared.slice(0, 4),
+              probability_spread_pct: Number(spread.toFixed(1)),
+              leg_a: { venue: a.venue, title: a.title, yes_pct: a.yes_probability_pct, url: a.url },
+              leg_b: { venue: b.venue, title: b.title, yes_pct: b.yes_probability_pct, url: b.url },
+            });
+          }
+        }
+      }
+    }
+    arbPairs.sort((a, b) => b.probability_spread_pct - a.probability_spread_pct);
+
+    const llm_markdown = [
+      `# Cross-Venue Prediction Market Odds & Arbitrage (${query})`,
+      `- **Markets Aggregated:** ${normalized.length} across Polymarket, Kalshi & Manifold`,
+      ...selected.slice(0, 6).map(
+        (m, idx) =>
+          `${idx + 1}. **[${m.venue.toUpperCase()}]** ${m.title} — **YES: ${m.yes_probability_pct}%** (Vol: $${m.volume_usd.toLocaleString()})`
+      ),
+    ].join("\n");
+
+    return {
+      query,
+      total_scanned: normalized.length,
+      count: selected.length,
+      markets: selected,
+      cross_venue_divergences: arbPairs.slice(0, 5),
+      llm_markdown,
+    };
+  });
+}
+
+
 
 

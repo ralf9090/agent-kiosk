@@ -17,6 +17,10 @@ import {
   whaleAlphaRadar,
   complianceCheck,
   defiSwapQuote,
+  evmTxSimulator,
+  perpFundingArbitrage,
+  tradfiMacroRadar,
+  kalshiPolymarketArb,
   withCache,
 } from "./providers.js";
 import {
@@ -567,9 +571,104 @@ export const MCP_TOOLS = [
     },
   },
   {
+    name: "evm_tx_simulator",
+    description:
+      "Pre-flight EVM Transaction Simulator, Gas Estimator, Revert Reason Decoder, ERC-20 Allowance Checker & EIP-1967 Proxy Detector ($0.005 USDC). Simulates any transaction via eth_call & eth_estimateGas across Base, Ethereum, Arbitrum, Optimism, and Polygon before signing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chain: {
+          type: "string",
+          enum: ["base", "ethereum", "arbitrum", "optimism", "polygon"],
+          description: "Target EVM blockchain (default: 'base')",
+        },
+        from: {
+          type: "string",
+          description: "0x sender wallet address",
+        },
+        to: {
+          type: "string",
+          description: "0x target smart contract or recipient address",
+        },
+        data: {
+          type: "string",
+          description: "0x hex calldata to simulate (default: '0x18160ddd')",
+        },
+        value: {
+          type: "string",
+          description: "Optional native ETH value in wei or 0x hex",
+        },
+        token: {
+          type: "string",
+          description: "Optional 0x ERC-20 token address to verify allowance",
+        },
+        spender: {
+          type: "string",
+          description: "Optional 0x spender contract address to verify ERC-20 allowance",
+        },
+        tx_hash: {
+          type: "string",
+          description: "Optional 0x transaction hash to decode receipt",
+        },
+      },
+    },
+  },
+  {
+    name: "perp_funding_arbitrage",
+    description:
+      "Real-time Cross-Exchange Perpetual Funding Rate Arbitrage, Annualized Basis Spread (APR), Open Interest & Crowded Positioning Radar ($0.008 USDC) across Hyperliquid and dYdX v4.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: {
+          type: "string",
+          description: "Optional coin ticker filter (e.g., 'BTC', 'ETH', 'SOL', 'AERO') or omit for highest APR spreads",
+        },
+        limit: {
+          type: "number",
+          description: "Max perpetual markets to return (1-40, default: 15)",
+        },
+      },
+    },
+  },
+  {
+    name: "tradfi_macro_radar",
+    description:
+      "Global TradFi, Macro & DeFi Capital Flow Intelligence Radar ($0.008 USDC). Returns live S&P 500, Nasdaq, CBOE VIX Volatility, US Dollar Index (DXY), US 10Y Treasury Yield, Gold, WTI Crude Oil, Crypto Fear & Greed Index, BTC Dominance, and top DeFi chain TVL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        focus: {
+          type: "string",
+          enum: ["all", "tradfi", "crypto", "defi"],
+          description: "Macro intelligence focus area (default: 'all')",
+        },
+      },
+    },
+  },
+  {
+    name: "kalshi_polymarket_arb",
+    description:
+      "Unified Kalshi, Polymarket & Manifold Prediction Market Aggregator and Cross-Venue Probability Spread / Arbitrage Scanner ($0.015 USDC).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Topic or event keyword to scan across Kalshi, Polymarket & Manifold (e.g., 'bitcoin', 'fed', 'ai')",
+        },
+        limit: {
+          type: "number",
+          description: "Max markets to return (1-25, default: 10)",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
     name: "buy_prepaid_pass",
     description:
-      "Mint a 30-Day Prepaid API Key Pass (ak_live_...) for $5.00 USDC on Base via x402. Unlocks all 18 Agent Kiosk REST & MCP intelligence tools for 30 days via the X-API-KEY header without per-call x402 signing (ideal for LangChain, n8n, Make.com, OpenAI Actions, and Python/JS bots).",
+      "Mint a 30-Day Prepaid API Key Pass (ak_live_...) for $5.00 USDC on Base via x402. Unlocks all 22 Agent Kiosk REST & MCP intelligence tools for 30 days via the X-API-KEY header without per-call x402 signing (ideal for LangChain, n8n, Make.com, OpenAI Actions, and Python/JS bots).",
     inputSchema: {
       type: "object",
       properties: {
@@ -615,7 +714,7 @@ async function pingHandler(params = {}, auth = null) {
     verified: Boolean(auth && auth.authorized),
     payment_mode: auth?.mode || "preview",
     service: "Agent Kiosk",
-    version: "2.5.0",
+    version: "2.6.0",
     protocol: "x402 v2 & v1 + MCP (Attested)",
     network: CONFIG.network,
     asset: "USDC",
@@ -624,8 +723,8 @@ async function pingHandler(params = {}, auth = null) {
     tx_hash: auth?.txHash || null,
     server_time_utc: new Date().toISOString(),
     catalog_summary: {
-      total_endpoints: 19,
-      core_tools_usdc: "0.01 - 0.03",
+      total_endpoints: 23,
+      core_tools_usdc: "0.005 - 0.03",
       action_and_compliance_usdc: "0.05 (/v1/defi-swap-quote, /v1/compliance-check)",
       mega_combo_dossiers_usdc: "0.10 (/v1/token-due-diligence, /v1/b2b-company-dossier, /v1/whale-alpha-radar)",
       prepaid_30d_pass_usdc: "5.00 (/v1/buy-pass)",
@@ -688,6 +787,10 @@ const ROUTE_HANDLERS = {
   "/v1/whale-alpha-radar": whaleAlphaRadar,
   "/v1/compliance-check": complianceCheck,
   "/v1/defi-swap-quote": defiSwapQuote,
+  "/v1/tx-simulate": cachedProvider("txsim", evmTxSimulator, 15_000),
+  "/v1/funding-rates": perpFundingArbitrage,
+  "/v1/macro-radar": tradfiMacroRadar,
+  "/v1/prediction-arb": kalshiPolymarketArb,
   "/v1/buy-pass": buyPassHandler,
 };
 
@@ -710,6 +813,10 @@ const TOOL_TO_ROUTE = {
   whale_alpha_radar: "/v1/whale-alpha-radar",
   compliance_check: "/v1/compliance-check",
   defi_swap_quote: "/v1/defi-swap-quote",
+  evm_tx_simulator: "/v1/tx-simulate",
+  perp_funding_arbitrage: "/v1/funding-rates",
+  tradfi_macro_radar: "/v1/macro-radar",
+  kalshi_polymarket_arb: "/v1/prediction-arb",
   buy_prepaid_pass: "/v1/buy-pass",
 };
 

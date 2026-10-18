@@ -448,11 +448,186 @@ export const PRICING = {
       },
     },
   },
+  "/v1/tx-simulate": {
+    priceUsd: "0.005",
+    amount: "5000", // 0.005 USDC
+    description:
+      "Pre-flight EVM Transaction Simulator, Gas Estimator, Revert Reason Decoder, ERC-20 Allowance Checker & EIP-1967 Proxy Detector across Base, Ethereum, Arbitrum, Optimism, and Polygon.",
+    mimeType: "application/json",
+    tags: [
+      "evm",
+      "simulate",
+      "estimate-gas",
+      "call",
+      "allowance",
+      "proxy",
+      "tx-receipt",
+      "base",
+      "ethereum",
+      "pre-flight",
+    ],
+    exampleInput: {
+      chain: "base",
+      from: "0xd8429209Aee6A398B9707DFf5F28AAA93452eE95",
+      to: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      data: "0x18160ddd",
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        chain: {
+          type: "string",
+          enum: ["base", "ethereum", "arbitrum", "optimism", "polygon"],
+          description: "Target EVM network (default: base)",
+        },
+        from: { type: "string", description: "0x sender address" },
+        to: { type: "string", description: "0x target contract or recipient address" },
+        data: { type: "string", description: "0x hex calldata to simulate via eth_call & eth_estimateGas" },
+        value: { type: "string", description: "Optional native ETH value in wei or 0x hex" },
+        token: { type: "string", description: "Optional 0x ERC-20 token address to check allowance" },
+        spender: { type: "string", description: "Optional 0x spender address to check ERC-20 allowance" },
+        tx_hash: { type: "string", description: "Optional 0x transaction hash to fetch receipt" },
+      },
+    },
+    exampleOutput: {
+      chain: "base",
+      chain_id: 8453,
+      verdict: "SAFE_TO_BROADCAST",
+      simulation: {
+        will_revert: false,
+        estimated_gas: 26410,
+        gas_price_gwei: 0.0061,
+        estimated_fee_usd: 0.0004,
+      },
+      target_contract: {
+        address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        is_contract: true,
+        is_eip1967_proxy: true,
+      },
+    },
+  },
+  "/v1/funding-rates": {
+    priceUsd: "0.008",
+    amount: "8000", // 0.008 USDC
+    description:
+      "Real-time Cross-Exchange Perpetual Funding Rate Arbitrage, Annualized Basis Spread (APR), Open Interest & Crowded Positioning Radar across Hyperliquid and dYdX v4.",
+    mimeType: "application/json",
+    tags: [
+      "funding-rates",
+      "perpetuals",
+      "arbitrage",
+      "hyperliquid",
+      "dydx",
+      "open-interest",
+      "crypto",
+      "basis-trade",
+    ],
+    exampleInput: { symbol: "BTC", limit: 10 },
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: {
+          type: "string",
+          description: "Optional coin ticker filter (e.g. BTC, ETH, SOL, AERO) or omit for top spreads",
+        },
+        limit: { type: "number", description: "Max perpetual markets to return (1-40)" },
+      },
+    },
+    exampleOutput: {
+      symbol_filter: "BTC",
+      markets_scanned: 234,
+      items: [
+        {
+          symbol: "BTC",
+          net_arb_spread_apr_pct: 11.45,
+          strategy: "SHORT Hyperliquid / LONG dYdX",
+          positioning_regime: "BALANCED",
+        },
+      ],
+    },
+  },
+  "/v1/macro-radar": {
+    priceUsd: "0.008",
+    amount: "8000", // 0.008 USDC
+    description:
+      "Global TradFi, Macro & DeFi Capital Flow Intelligence Radar: live S&P 500, Nasdaq, VIX Volatility, US Dollar Index (DXY), US 10Y Treasury Yield, Gold, Crude Oil, Crypto Fear & Greed, BTC Dominance & DeFi Chain TVL.",
+    mimeType: "application/json",
+    tags: [
+      "tradfi",
+      "macro",
+      "vix",
+      "dxy",
+      "sp500",
+      "treasury-yields",
+      "fear-and-greed",
+      "defi-analytics",
+      "tvl",
+    ],
+    exampleInput: { focus: "all" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        focus: {
+          type: "string",
+          enum: ["all", "tradfi", "crypto", "defi"],
+          description: "Macro focus area (default: all)",
+        },
+      },
+    },
+    exampleOutput: {
+      macro_regime: "MACRO_ROTATION_NEUTRAL",
+      fear_and_greed: { value: 64, classification: "Greed" },
+      tradfi_benchmarks: [
+        { ticker: "^GSPC", name: "S&P 500", price: 5842.5, change_pct: 0.42 },
+        { ticker: "^VIX", name: "CBOE Volatility Index (VIX)", price: 18.4, change_pct: -2.1 },
+      ],
+    },
+  },
+  "/v1/prediction-arb": {
+    priceUsd: "0.015",
+    amount: "15000", // 0.015 USDC
+    description:
+      "Unified Kalshi, Polymarket & Manifold Prediction Market Aggregator and Cross-Venue Probability Spread / Arbitrage Scanner.",
+    mimeType: "application/json",
+    tags: [
+      "kalshi",
+      "polymarket",
+      "prediction-markets",
+      "arbitrage",
+      "odds",
+      "probabilities",
+      "forecasting",
+    ],
+    exampleInput: { query: "bitcoin", limit: 10 },
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Topic or event keyword to scan across Kalshi, Polymarket & Manifold (e.g. bitcoin, fed, election)",
+        },
+        limit: { type: "number", description: "Max markets to return (1-25)" },
+      },
+      required: ["query"],
+    },
+    exampleOutput: {
+      query: "bitcoin",
+      total_scanned: 65,
+      markets: [
+        {
+          venue: "polymarket",
+          title: "Will Bitcoin reach $100k?",
+          yes_probability_pct: 62.5,
+          volume_usd: 14500000,
+        },
+      ],
+    },
+  },
   "/v1/buy-pass": {
     priceUsd: "5.00",
     amount: "5000000", // 5.00 USDC
     description:
-      "Instant 30-Day Prepaid API Key Pass (ak_live_...) for AI agents, LangChain, n8n, Make.com, and developers. Unlocks all 18 Agent Kiosk REST & MCP intelligence tools for 30 days via X-API-KEY header without per-call x402 signing.",
+      "Instant 30-Day Prepaid API Key Pass (ak_live_...) for AI agents, LangChain, n8n, Make.com, and developers. Unlocks all 22 Agent Kiosk REST & MCP intelligence tools for 30 days via X-API-KEY header without per-call x402 signing.",
     mimeType: "application/json",
     tags: ["prepaid", "api-key", "pass", "subscription", "access", "agents", "mcp", "attested"],
     exampleInput: { agent_name: "my-autonomous-agent" },
