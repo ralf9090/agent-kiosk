@@ -837,22 +837,6 @@ export function build402Challenge(routePath, resourceUrl) {
           version: "2",
         },
       },
-      {
-        scheme: "exact",
-        network: "base",
-        maxAmountRequired: route.amount,
-        amount: route.amount,
-        asset: CONFIG.usdcAsset,
-        payTo: CONFIG.payToWallet,
-        maxTimeoutSeconds: 60,
-        resource: resourceUrl,
-        description: route.description,
-        mimeType: route.mimeType,
-        extra: {
-          name: "USD Coin",
-          version: "2",
-        },
-      },
     ],
     extensions: {
       bazaar: {
