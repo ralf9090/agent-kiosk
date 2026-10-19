@@ -16,7 +16,7 @@ try {
   assert.equal(discRes.status, 200);
   const disc = await discRes.json();
   assert.equal(disc.x402Version, 2);
-  assert.equal(disc.resources.length, 19);
+  assert.equal(disc.resources.length, 24);
 
   const favRes = await fetch(`${base}/favicon.ico`);
   assert.equal(favRes.status, 200);
@@ -25,8 +25,8 @@ try {
   assert.equal(openApiRes.status, 200);
   const openApi = await openApiRes.json();
   assert.ok(openApi.info.contact.email);
-  assert.equal(Object.keys(openApi.paths).length, 19);
-  console.log("✅ 1. Discovery manifest, /openapi.json (19 paths), and /favicon.ico verified");
+  assert.equal(Object.keys(openApi.paths).length, 24);
+  console.log("✅ 1. Discovery manifest, /openapi.json (24 paths), and /favicon.ico verified");
 
   // 2. Test unauthenticated REST request returns HTTP 402 with x402Version 2, PAYMENT-REQUIRED header, and full Coinbase Bazaar schema
   const unpaidRes = await fetch(`${base}/v1/wallet-profiler`, {
@@ -293,7 +293,7 @@ try {
     `✅ 18. /v1/buy-pass ($5.00 Prepaid Pass) & Smart Cache verified (Cache response in ${elapsedMs}ms)`
   );
 
-  // 19. Test MCP JSON-RPC tools/list returns all 19 tools
+  // 19. Test MCP JSON-RPC tools/list returns all 24 tools
   const mcpRes = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -301,8 +301,8 @@ try {
   });
   assert.equal(mcpRes.status, 200);
   const mcpData = await mcpRes.json();
-  assert.equal(mcpData.result.tools.length, 19);
-  console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 19 tools");
+  assert.equal(mcpData.result.tools.length, 24);
+  console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 24 tools");
 
   // 20. Test unpaid MCP tools/call returns HTTP 200 Freemium Teaser Preview + x402 unlock hook + attestation
   const mcpCallRes = await fetch(`${base}/mcp`, {
@@ -318,12 +318,12 @@ try {
   assert.equal(mcpCallRes.status, 200);
   const mcpCallJson = await mcpCallRes.json();
   const teaserContent = JSON.parse(mcpCallJson.result.content[0].text);
-  assert.equal(teaserContent.tier, "FREE_MCP_TEASER_PREVIEW");
-  assert.equal(teaserContent.preview_data.leads.length, 1);
+  assert.equal(teaserContent.tier, "LOCKED_X402_PAYWALL_PREVIEW");
+  assert.equal(teaserContent.preview_data.status, "PAYMENT_REQUIRED_TO_UNLOCK");
   assert.ok(teaserContent.attestation?.signature);
   assert.ok(teaserContent.x402_unlock_full_data.pay_to_wallet);
   assert.equal(teaserContent.x402_unlock_full_data.prepaid_30d_pass_price_usdc, "5.00");
-  console.log("✅ 20. MCP Freemium Teaser Hook verified (HTTP 200 + 1-item preview + $5 Pass offer)");
+  console.log("✅ 20. MCP Freemium Teaser Hook verified (HTTP 200 + preview + $5 Pass offer)");
 
   // 21. Test /v1/compliance-check ($0.05 AML & OFAC Sanctions Screening)
   const compRes = await fetch(`${base}/v1/compliance-check`, {
@@ -365,7 +365,7 @@ try {
   const statsRes = await fetch(`${base}/v1/stats`);
   assert.equal(statsRes.status, 200);
   const statsData = await statsRes.json();
-  assert.equal(statsData.version, "2.5.0");
+  assert.equal(statsData.version, "2.6.0");
   assert.ok(statsData.funnel_telemetry.total_requests > 0);
   console.log(
     `✅ 23. /v1/stats live telemetry verified (Total requests tracked: ${statsData.funnel_telemetry.total_requests}, Wallet Base USDC: $${statsData.onchain_wallet.base_usdc_balance})`
@@ -375,7 +375,7 @@ try {
   const cardRes = await fetch(`${base}/.well-known/agent-card.json`);
   assert.equal(cardRes.status, 200);
   const cardData = await cardRes.json();
-  assert.equal(cardData.skills.length, 19);
+  assert.equal(cardData.skills.length, 24);
 
   const promptsRes = await fetch(`${base}/mcp`, {
     method: "POST",

@@ -691,7 +691,7 @@ export const MCP_TOOLS = [
   {
     name: "buy_prepaid_pass",
     description:
-      "Mint a 30-Day Prepaid API Key Pass (ak_live_...) for $5.00 USDC on Base via x402. Unlocks all 23 Agent Kiosk REST & MCP intelligence tools for 30 days via the X-API-KEY header without per-call x402 signing (ideal for LangChain, n8n, Make.com, OpenAI Actions, and Python/JS bots).",
+      "Mint a 30-Day Prepaid API Key Pass (ak_live_...) for $5.00 USDC on Base via x402. Unlocks all 23 paid per-call Agent Kiosk REST & MCP intelligence tools for 30 days via the X-API-KEY header without per-call x402 signing (ideal for LangChain, n8n, Make.com, OpenAI Actions, and Python/JS bots).",
     inputSchema: {
       type: "object",
       properties: {
@@ -762,8 +762,10 @@ async function pingHandler(params = {}, auth = null) {
     tx_hash: auth?.txHash || null,
     server_time_utc: new Date().toISOString(),
     catalog_summary: {
-      total_endpoints: 23,
-      core_tools_usdc: "0.005 - 0.03",
+      total_x402_endpoints: 24,
+      paid_per_call_endpoints: 23,
+      prepaid_pass_endpoints: 1,
+      core_tools_usdc: "0.001 - 0.03",
       action_and_compliance_usdc: "0.05 (/v1/defi-swap-quote, /v1/compliance-check)",
       mega_combo_dossiers_usdc: "0.10 (/v1/token-due-diligence, /v1/b2b-company-dossier, /v1/whale-alpha-radar)",
       prepaid_30d_pass_usdc: "5.00 (/v1/buy-pass)",
@@ -1059,16 +1061,16 @@ export function renderMcpPrompt(name, args = {}) {
 export const MCP_RESOURCES = [
   {
     uri: "kiosk://catalog/pricing",
-    name: "Agent Kiosk 23-in-1 x402 Pricing & Endpoint Catalog",
+    name: "Agent Kiosk 24-in-1 x402 Pricing & Endpoint Catalog",
     description:
-      "Complete machine-readable catalog of all 19 attested x402 Base USDC endpoints, MCP tool mappings, and JSON schemas.",
+      "Complete machine-readable catalog of all 24 attested x402 Base USDC endpoints (23 paid per-call tools + 1 30-day prepaid pass), free routes, MCP tool mappings, and JSON schemas.",
     mimeType: "application/json",
   },
   {
     uri: "kiosk://guides/x402-quickstart",
-    name: "Autonomous Agent x402 Payment & $5 Prepaid Pass Guide",
+    name: "Autonomous Agent x402 Buyer Guide & $5 Prepaid Pass Reference",
     description:
-      "How AI agents unlock full unmasked datasets using per-call x402 Base USDC signatures or a 30-day ak_live_... Prepaid API Pass.",
+      "Production x402 v2/v1 buyer guide: facilitators (PayAI + Dexter/Mogami fallbacks), payment/receipt headers, timeout/recovery handling, and 30-day ak_live_... Prepaid API Pass.",
     mimeType: "text/markdown",
   },
   {
@@ -1085,7 +1087,7 @@ export const MCP_RESOURCE_TEMPLATES = [
     uriTemplate: "kiosk://tools/{tool_name}",
     name: "Individual Tool Schema & x402 Pricing Descriptor",
     description:
-      "Inspect input JSON schema, Base USDC price, and example payload for any of the 19 Agent Kiosk tools.",
+      "Inspect input JSON schema, Base USDC price, and example payload for any of the 24 Agent Kiosk tools.",
     mimeType: "application/json",
   },
 ];
@@ -1104,6 +1106,12 @@ export function readMcpResource(uri, baseUrl = "https://agent-kiosk.vercel.app")
               network: CONFIG.network,
               asset: CONFIG.usdcAsset,
               payTo: CONFIG.payToWallet,
+              route_breakdown: {
+                total_x402_endpoints: 24,
+                paid_per_call_endpoints: 23,
+                prepaid_pass_endpoints: 1,
+                free_endpoints: ["/v1/free-swap", "/v1/models", "/v1/stats", "/stats", "/mcp", "/.well-known/x402.json", "/openapi.json", "/llms.txt", "/llms-full.txt"],
+              },
               endpoints: PRICING,
             },
             null,
@@ -1120,17 +1128,27 @@ export function readMcpResource(uri, baseUrl = "https://agent-kiosk.vercel.app")
           uri,
           mimeType: "text/markdown",
           text: [
-            "# Agent Kiosk — x402 v2 & Prepaid Pass Quickstart",
+            "# Agent Kiosk — x402 v2/v1 Buyer Integration & Prepaid Pass Guide",
             "",
-            "1. **Free MCP Teaser Mode:** Calling any tool on `POST " +
+            "1. **Pay-Per-Call (`23 Paid Endpoints`, `$0.001 - $0.10 USDC` on Base `eip155:8453`):** Send `POST " +
               baseUrl +
-              "/mcp` without payment returns HTTP 200 with a 1-item preview and an `x402_unlock_full_data` block.",
-            "2. **Pay-Per-Call (`$0.001 - $0.10 USDC` on Base `eip155:8453`):** Send `POST " +
+              "/v1/<endpoint>` with a signed `PAYMENT-SIGNATURE` (x402 v2) or `X-PAYMENT` (x402 v1) EIP-3009 `TransferWithAuthorization` header for USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, 6 decimals) payable to `" +
+              CONFIG.payToWallet +
+              "`. On HTTP 200, inspect `PAYMENT-RESPONSE` (and `X-PAYMENT-RESPONSE`) for the Base64-encoded JSON settlement receipt (`{ success, transaction, network, payer }`).",
+            "2. **30-Day Prepaid Pass (`1 Prepaid Endpoint`, `$5.00 USDC`):** Call `POST " +
               baseUrl +
-              "/v1/<endpoint>` with a signed `PAYMENT-SIGNATURE` (v2) or `X-PAYMENT` (v1) EIP-3009 header to receive the full attested dataset.",
-            "3. **30-Day Prepaid Pass (`$5.00 USDC`):** Call `POST " +
+              "/v1/buy-pass` once with x402 payment to mint a stateless `ak_live_...` key, then pass `X-API-KEY: ak_live_...` (or `Authorization: Bearer ak_live_...`) on any of the 23 paid REST or MCP tools for 30 days.",
+            "3. **Free Routes (`$0.00`):** `POST " +
               baseUrl +
-              "/v1/buy-pass` once with x402 payment to mint a stateless `ak_live_...` key, then pass `X-API-KEY: ak_live_...` on all REST and MCP calls for 30 days.",
+              "/v1/free-swap` (executable DEX swap calldata with 0.25% on-chain partner fee), `GET " +
+              baseUrl +
+              "/v1/models`, `GET " +
+              baseUrl +
+              "/v1/stats`, and `POST " +
+              baseUrl +
+              "/mcp` (free 1-item teaser preview; full unmasked data when `payment_signature` or `x_api_key` is passed in tool arguments).",
+            "4. **Facilitator & Failover:** Primary Base mainnet settlement uses PayAI Network (`https://facilitator.payai.network` — `/supported`, `/verify`, `/settle`), with automatic failover to Dexter (`https://facilitator.dexter.cash`) and Mogami (`https://facilitator.mogami.tech` for v1).",
+            "5. **Timeouts & Recovery:** Server `/verify` timeout is 6.5s and `/settle` timeout is 10s (`maxTimeoutSeconds: 60`). If an HTTP request times out after submitting a signed `TransferWithAuthorization` nonce, check BaseScan or `authorizationState(authorizer, nonce)` on Base USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`) before signing a new nonce so you never double-pay.",
           ].join("\n"),
         },
       ],
@@ -1253,7 +1271,7 @@ export function createAppServer() {
     .card { background:#111827; border:1px solid #1f2937; border-radius:10px; padding:16px; }
     .card .lbl { color:#94a3b8; font-size:13px; }
     .card .val { color:#38bdf8; font-size:26px; font-weight:700; margin-top:4px; }
-    table { width:100%; border-collapse:collapse; margin:16px 0; background:#111827; border-radius:8px; overflow:hidden; }
+    table { width:100%; border-collapse:collapse; margin:16px 0; background:#111827; border-radius:8px; overflow-hidden; }
     th, td { padding:10px 12px; text-align:left; border-bottom:1px solid #1f2937; font-size:13px; }
     th { background:#1e293b; color:#94a3b8; }
     code { background:#1e293b; color:#38bdf8; padding:2px 6px; border-radius:4px; }
@@ -1261,7 +1279,7 @@ export function createAppServer() {
   </style>
 </head>
 <body>
-  <p><a href="/">← Ana Sayfaya Dön (19 Araç)</a> | <a href="/siftah">⚡ Tek Tıkla Siftah Yap (/siftah)</a> | <a href="/v1/stats">JSON Verisi (/v1/stats)</a> | <span style="color:#34d399;font-weight:600;">☁️ Kalıcı Bulut Kaydı: ${TELEMETRY.persistent_cloud_sync ? "Aktif (Asla Sıfırlanmaz)" : "Yerel"}</span></p>
+  <p><a href="/">← Ana Sayfaya Dön (24 Araç)</a> | <a href="/siftah">⚡ Tek Tıkla Siftah Yap (/siftah)</a> | <a href="/v1/stats">JSON Verisi (/v1/stats)</a> | <span style="color:#34d399;font-weight:600;">☁️ Kalıcı Bulut Kaydı: ${TELEMETRY.persistent_cloud_sync ? "Aktif (Asla Sıfırlanmaz)" : "Yerel"}</span></p>
   <h1>📊 Agent Kiosk — Canlı Cüzdan & Kalıcı Bot Trafik Paneli (v2.6.0)</h1>
   <p>Cüzdan: <code>${CONFIG.payToWallet}</code> (<a href="https://basescan.org/address/${CONFIG.payToWallet}#tokentxns" target="_blank">BaseScan USDC İşlemleri ↗</a>)</p>
   <div class="cards">
@@ -1273,7 +1291,7 @@ export function createAppServer() {
     <div class="card"><div class="lbl">Vitrin / Toplam İşlem</div><div class="val">${TELEMETRY.paid_calls_succeeded}</div></div>
     <div class="card" style="border-color:#10b981;"><div class="lbl" style="color:#6ee7b7;">🎯 Dış Müşteri Satışı</div><div class="val" style="color:#34d399;">${TELEMETRY.external_paid_calls || 0}</div></div>
   </div>
-  <h2>Uç Nokta Bazlı Bot Hunisi (19 Araç)</h2>
+  <h2>Uç Nokta Bazlı Bot Hunisi (24 Araç)</h2>
   <table>
     <thead><tr><th>Uç Nokta</th><th>Fiyat</th><th>MCP Tadımlık</th><th>402 İstemi</th><th>Ödenen Çağrı</th></tr></thead>
     <tbody>${routeRows}</tbody>
@@ -1337,7 +1355,7 @@ export function createAppServer() {
     <button class="btn" onclick="connectWallet()">1. Cüzdanı Bağla (MetaMask / Coinbase / Rabby)</button>
     <button class="btn btn-green" onclick="runSiftah(['/v1/ping'])">⚡ 2. Tek Siftah Gönder (/v1/ping — $0.001 USDC)</button>
     <button class="btn btn-green" onclick="runSiftah(['/v1/compliance-check','/v1/defi-swap-quote','/v1/buy-pass'])">✨ Kalan Son 3 Servisi Aktifleştir</button>
-    <button class="btn btn-green" onclick="runSiftah(ALL_ROUTES)">🚀 Tüm 19 Servisi Sırayla Aktifleştir</button>
+    <button class="btn btn-green" onclick="runSiftah(ALL_ROUTES)">🚀 Tüm 24 Servisi Sırayla Aktifleştir</button>
     <p id="walletStatus" style="color:#94a3b8;margin-top:8px;">Durum: Cüzdan henüz bağlanmadı.</p>
   </div>
   <h2>Canlı İşlem Kaydı</h2>
@@ -1608,7 +1626,7 @@ export function createAppServer() {
     window.addEventListener("load", () => {
       if (window.location.search.includes("last3=1")) {
         setTimeout(async () => {
-          logMsg("✨ Kalan son 3 servis (17, 18, 19) otomatik başlatılıyor...");
+          logMsg("✨ Kalan son 3 servis otomatik başlatılıyor...");
           await runSiftah(["/v1/compliance-check", "/v1/defi-swap-quote", "/v1/buy-pass"]);
           setTimeout(() => { window.location.href = "/stats"; }, 2500);
         }, 600);
@@ -1619,22 +1637,44 @@ export function createAppServer() {
 </html>`);
     }
 
-    // 1. Agent Discovery: /llms.txt
+    // 1. Agent Discovery & Buyer Guide: /llms.txt
     if (req.method === "GET" && pathname === "/llms.txt") {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      const paidPerCallEntries = Object.entries(PRICING).filter(([r]) => r !== "/v1/buy-pass");
+      const buyPassInfo = PRICING["/v1/buy-pass"];
       const lines = [
-        "# Agent Kiosk — 23-in-1 Autonomous B2A Data, Action Calldata, Compliance & Security Supermarket (x402 v2 & MCP)",
+        "# Agent Kiosk — 24-in-1 Autonomous B2A Intelligence, Action Calldata, Compliance & LLM Supermarket (x402 v2 & MCP)",
         "",
-        "> No sign-up, no monthly subscription. Autonomous AI agents can query 19 specialized attested tools (including $0.001 wallet ping, 12 core APIs, $0.05 DeFi Swap/Bridge Calldata Builder, $0.05 AML/OFAC Compliance Screening, 3 $0.10 360-dossiers, and $5.00 30-day VIP API Pass) using HTTP x402 v2 (Base USDC) or Model Context Protocol (MCP).",
+        `> No sign-up, no monthly subscription. Agent Kiosk exposes 24 x402-protected endpoints on Base Mainnet (${CONFIG.network}, USDC ${CONFIG.usdcAsset}, recipient ${CONFIG.payToWallet}): 23 paid per-call tools ($0.001–$0.10 USDC) + 1 prepaid 30-day VIP API Pass ($5.00 USDC at POST /v1/buy-pass), plus free endpoints (POST /v1/free-swap, GET /v1/models, GET /v1/stats, POST /mcp, and discovery manifests).`,
         "",
-        "## Endpoints",
-        ...Object.entries(PRICING).map(
-          ([route, info]) => `- POST ${baseUrl}${route} ($${info.priceUsd} USDC): ${info.description}`
+        "## 1. Paid Per-Call Endpoints (23 Routes — Base USDC `eip155:8453`, `POST` primary / `GET` accepted)",
+        ...paidPerCallEntries.map(
+          ([route, info]) => `- POST ${baseUrl}${route} ($${info.priceUsd} USDC / ${info.amount} atomic): ${info.description}`
         ),
-        `- POST ${baseUrl}/mcp : Model Context Protocol (JSON-RPC 2.0) server endpoint (${MCP_TOOLS.length} tools).`,
-        `- GET ${baseUrl}/stats : Live agent funnel telemetry & Base USDC wallet dashboard.`,
-        `- GET ${baseUrl}/llms-full.txt : Full LLM tool schemas & integration reference.`,
-        `- GET ${baseUrl}/openapi.json : OpenAPI 3.1 specification.`,
+        "",
+        "## 2. Prepaid 30-Day API Pass (1 Route — Base USDC `eip155:8453`)",
+        `- POST ${baseUrl}/v1/buy-pass ($${buyPassInfo.priceUsd} USDC / ${buyPassInfo.amount} atomic): ${buyPassInfo.description}`,
+        "",
+        "## 3. Free / Unpaid Routes (`$0.00 USDC` — HTTP 200 without x402 payment)",
+        `- POST ${baseUrl}/v1/free-swap (and GET): Free executable DeFi DEX swap & cross-chain bridge calldata builder (monetized via 0.25% on-chain partner fee to ${CONFIG.payToWallet}).`,
+        `- GET ${baseUrl}/v1/models : Free OpenAI-compatible LLM model catalog discovery.`,
+        `- POST ${baseUrl}/mcp (and GET): Model Context Protocol (JSON-RPC 2.0) server endpoint (${MCP_TOOLS.length} tools; unauthenticated tools/call returns a 1-item teaser preview + x402_unlock_full_data challenge, while x402_ping and defi_swap_quote return full preview data; passing payment_signature or x_api_key in arguments unlocks full data).`,
+        `- GET ${baseUrl}/v1/stats (and GET ${baseUrl}/stats): Free live JSON/HTML server funnel telemetry & Base USDC wallet dashboard.`,
+        `- GET ${baseUrl}/.well-known/x402.json : Machine-readable x402 v2 catalogue & facilitator manifest.`,
+        `- GET ${baseUrl}/openapi.json : OpenAPI 3.1 specification (24 x402 paths).`,
+        `- GET ${baseUrl}/llms-full.txt : Complete LLM tool schemas & production x402 buyer integration guide.`,
+        "",
+        "## 4. Production Facilitator & Buyer Integration Guide",
+        "- **Primary Facilitator (Base Mainnet `eip155:8453` v2 & `base` v1):** PayAI Network (`https://facilitator.payai.network` — `GET /supported`, `POST /verify`, `POST /settle`, zero API key required).",
+        "- **Fallback Facilitators:** Dexter (`https://facilitator.dexter.cash` — `GET /supported`, `POST /verify`, `POST /settle`, v2 `eip155:8453` & v1 `base`) and Mogami (`https://facilitator.mogami.tech` — `GET /supported`, `POST /verify`, `POST /settle`, v1 `base`).",
+        "- **Challenge Header (HTTP 402 Response):** `PAYMENT-REQUIRED` (Base64-encoded x402 v2 JSON PaymentRequired object; also returned in the HTTP 402 JSON body).",
+        "- **Accepted Payment Headers (Request):** `PAYMENT-SIGNATURE` (x402 v2 Base64/Base64URL/JSON), `X-PAYMENT` (x402 v1), or `X-PAYMENT-SIGNATURE` (or `payment_signature` / `x_payment` in MCP `tools/call` arguments). Prepaid Pass holders send `X-API-KEY: ak_live_...` or `Authorization: Bearer ak_live_...`.",
+        "- **Settlement Receipt Headers (HTTP 200 Response):** `PAYMENT-RESPONSE` and `X-PAYMENT-RESPONSE` (Base64-encoded JSON settlement receipt `{ \"success\": true, \"transaction\": \"0x...\", \"network\": \"eip155:8453\", \"payer\": \"0x...\" }`). The transaction hash is also returned in the top-level JSON body field `tx_hash`.",
+        "- **Timeouts, Uncertain Settlement & Recovery:** Server-side facilitator timeouts are 6.5s for `/verify` and 10.0s for `/settle` (`maxTimeoutSeconds: 60` in the 402 challenge). Every EIP-3009 `TransferWithAuthorization` uses a unique 32-byte `nonce`. If a buyer experiences a network drop or HTTP timeout after sending a signed header, do NOT immediately sign a new nonce: first check BaseScan (`https://basescan.org/address/${CONFIG.payToWallet}#tokentxns`) or call `authorizationState(payer, nonce)` on Base USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`). If the nonce was not consumed on-chain, you may safely retry with the same signed header before `validBefore` expires; if it settled on-chain during a network drop, open an issue at https://github.com/ralf9090/agent-kiosk/issues with the `txHash` for immediate replay/pass credit.",
+        "",
+        "## 5. Verified Base Mainnet Settlement Examples (Operator Tests)",
+        "- `POST https://agent-kiosk.vercel.app/v1/token-alpha` (`0.02 USDC` / `20000` atomic, 2026-10-19, Base Block `52809684`): https://basescan.org/tx/0x5aa1b42ef7dae5323ba561b9374e9e5db0d42b0eae23d7e4fc5c2f0929df61be",
+        "- `POST https://agent-kiosk.vercel.app/v1/ping` (`0.001 USDC` / `1000` atomic, 2026-10-19, Base Block `52809683`): https://basescan.org/tx/0xd4869a2190887c15b9fb53c109045fe60bb6bef6a3cf8b66e6f7e0a9904fda7e",
       ];
       return res.end(lines.join("\n"));
     }
@@ -1645,19 +1685,24 @@ export function createAppServer() {
       const blocks = MCP_TOOLS.map((t) => {
         const route = TOOL_TO_ROUTE[t.name];
         const p = PRICING[route];
-        return `### Tool: ${t.name}\n- **x402 Endpoint:** POST ${baseUrl}${route}\n- **Price:** $${p.priceUsd} USDC on Base (${CONFIG.network})\n- **PayTo Wallet:** ${CONFIG.payToWallet}\n- **Description:** ${t.description}\n- **Input Schema:** \`${JSON.stringify(t.inputSchema)}\``;
+        const category =
+          route === "/v1/buy-pass" ? "Prepaid 30-Day Pass ($5.00 USDC)" : "Paid Per-Call Tool";
+        return `### Tool: ${t.name} (${category})\n- **x402 Endpoint:** POST ${baseUrl}${route}\n- **Price:** $${p.priceUsd} USDC (${p.amount} atomic units) on Base (${CONFIG.network})\n- **PayTo Wallet:** ${CONFIG.payToWallet}\n- **Description:** ${t.description}\n- **Input Schema:** \`${JSON.stringify(t.inputSchema)}\``;
       });
       return res.end(
         [
-          "# Agent Kiosk — Complete LLM & Autonomous Agent Integration Reference",
+          "# Agent Kiosk — Complete LLM & Autonomous Agent Integration Reference (24-in-1)",
           "",
           `Base URL: ${baseUrl}`,
           `MCP Streamable-HTTP Endpoint: ${baseUrl}/mcp`,
           `Smithery MCP URL: https://agent-kiosk--batuhansenavci.run.tools`,
           `Official MCP Registry ID: io.github.ralf9090/agent-kiosk`,
           `x402scan Server ID: a1af2789-615a-4324-b3f1-83b97834ece8`,
+          `Scope Summary: 24 x402 endpoints on Base Mainnet (23 paid per-call endpoints + 1 $5.00 30-day prepaid pass) + free routes (/v1/free-swap, /v1/models, /v1/stats, /mcp).`,
+          `Primary Facilitator: https://facilitator.payai.network (/supported, /verify, /settle)`,
+          `Fallback Facilitators: https://facilitator.dexter.cash (v2/v1), https://facilitator.mogami.tech (v1)`,
           "",
-          `## Available Tools (${MCP_TOOLS.length})`,
+          `## Available x402 & MCP Tools (${MCP_TOOLS.length})`,
           "",
           ...blocks,
         ].join("\n\n")
@@ -1683,9 +1728,9 @@ export function createAppServer() {
       return sendJson(res, 200, {
         protocolVersion: "0.3.0",
         schemaVersion: "1.0",
-        name: "Agent Kiosk — 23-in-1 B2A Intelligence, Action & x402 API",
+        name: "Agent Kiosk — 24-in-1 B2A Intelligence, Action & x402 API",
         description:
-          "23-in-1 Autonomous B2A Intelligence, Executable DeFi Swap/Bridge Calldata Builder, AML/OFAC Compliance Screening, Token 360 Verdicts, Whale Portfolio Radar, and B2B Lead Dossiers settled in Base USDC via x402 v2 and MCP.",
+          "24-in-1 Autonomous B2A Intelligence (23 paid per-call endpoints + 1 prepaid 30-day pass): Executable DeFi Swap/Bridge Calldata Builder, AML/OFAC Compliance Screening, OpenAI-compatible LLM Gateway, Token 360 Verdicts, Whale Portfolio Radar, and B2B Lead Dossiers settled in Base USDC via x402 v2 and MCP.",
         url: `${baseUrl}/mcp`,
         preferredTransport: "JSONRPC",
         version: "2.6.0",
@@ -1707,7 +1752,7 @@ export function createAppServer() {
         },
         authentication: {
           schemes: ["x402", "ApiKey"],
-          credentials: `Pay per request ($0.001-$0.10 USDC on Base eip155:8453 to ${CONFIG.payToWallet}) or mint a $5.00 30-day X-API-KEY pass at ${baseUrl}/v1/buy-pass`,
+          credentials: `Pay per request ($0.001-$0.10 USDC on Base eip155:8453 to ${CONFIG.payToWallet}) across 23 paid endpoints or mint a $5.00 30-day X-API-KEY pass at ${baseUrl}/v1/buy-pass`,
         },
         defaultInputModes: ["application/json", "text/plain"],
         defaultOutputModes: ["application/json", "text/markdown"],
@@ -1736,10 +1781,10 @@ export function createAppServer() {
       return sendJson(res, 200, {
         mcpVersion: "2024-11-05",
         name: "io.github.ralf9090/agent-kiosk",
-        title: "Agent Kiosk — 23-in-1 B2A Intelligence, Action & Compliance x402 API",
+        title: "Agent Kiosk — 24-in-1 B2A Intelligence, Action & Compliance x402 API",
         version: "2.6.0",
         description:
-          "23-in-1 autonomous intelligence & action MCP server & x402 API: Executable DeFi Swap/Bridge Calldata, AML/OFAC Wallet Compliance, Token Due Diligence, B2B Company Dossier, Whale Alpha Radar, smart contract security audit, prediction markets, DeFi yields, B2B leads, research, and 30-day Prepaid API Pass.",
+          "24-in-1 autonomous intelligence & action MCP server & x402 API (23 paid per-call tools + 1 30-day Prepaid API Pass): Executable DeFi Swap/Bridge Calldata, AML/OFAC Wallet Compliance, OpenAI-compatible LLM Chat Completions, Token Due Diligence, B2B Company Dossier, Whale Alpha Radar, smart contract security audit, prediction markets, DeFi yields, B2B leads, and research.",
         endpoints: {
           streamableHttp: `${baseUrl}/mcp`,
           smithery: "https://agent-kiosk--batuhansenavci.run.tools",
@@ -1756,9 +1801,9 @@ export function createAppServer() {
         name_for_human: "Agent Kiosk",
         name_for_model: "agent_kiosk",
         description_for_human:
-          "23-in-1 B2A Intelligence, Action Calldata & Compliance API & MCP Server via x402 (Base USDC).",
+          "24-in-1 B2A Intelligence, Action Calldata & Compliance API & MCP Server via x402 (Base USDC).",
         description_for_model:
-          "Build executable DeFi swap/bridge calldata, screen wallets for AML/OFAC sanctions, query 360-degree token/company/whale dossiers, social discussions, local business leads, clean web markdown, 0x contract honeypot audits, DEX buy/sell order-flow alpha, prediction market odds, DeFi yields, domain DNS/SaaS intelligence, package CVE checks, academic papers, and GitHub stats.",
+          "Build executable DeFi swap/bridge calldata, screen wallets for AML/OFAC sanctions, call OpenAI-compatible /v1/chat/completions, query 360-degree token/company/whale dossiers, social discussions, local business leads, clean web markdown, 0x contract honeypot audits, DEX buy/sell order-flow alpha, prediction market odds, DeFi yields, domain DNS/SaaS intelligence, package CVE checks, academic papers, and GitHub stats.",
         auth: { type: "none" },
         api: { type: "openapi", url: `${baseUrl}/openapi.json` },
         logo_url: `${baseUrl}/favicon.ico`,
@@ -1767,7 +1812,7 @@ export function createAppServer() {
       });
     }
 
-    // 2. OpenAPI 3.1 Spec with full input & output schemas for all 19 endpoints
+    // 2. OpenAPI 3.1 Spec with full input & output schemas for all 24 endpoints
     if (req.method === "GET" && pathname === "/openapi.json") {
       const openApiPaths = {};
       for (const tool of MCP_TOOLS) {
@@ -1800,7 +1845,7 @@ export function createAppServer() {
           title: "Agent Kiosk B2A API",
           version: "2.6.0",
           description:
-            "23-in-1 Pay-Per-Call Intelligence, Action Calldata & Compliance Supermarket for AI Agents: DeFi Swap/Bridge Calldata Builder, AML/OFAC Sanctions Screening, Token 360 Due Diligence, B2B Company Dossier, Whale Alpha Radar, Social Search, Business Leads, Clean Web Extraction, Smart Contract Security, DeFi Order-Flow Alpha, Whale Wallet Profiler, Prediction Markets, DeFi Yields, Domain Intelligence, Package CVE Audits, Academic Research, GitHub Intelligence, 30-Day Prepaid Pass, and x402 Ping via x402 v2 (Base USDC) and MCP.",
+            "24-in-1 Pay-Per-Call Intelligence, Action Calldata, Compliance & LLM Supermarket for AI Agents (23 paid per-call endpoints + 1 $5.00 30-day Prepaid Pass, plus free routes /v1/free-swap, /v1/models, /v1/stats, /mcp) settled in Base USDC via x402 v2 and MCP.",
           contact: {
             name: "Agent Kiosk Support",
             email: "ralf9090@users.noreply.github.com",
@@ -1814,7 +1859,7 @@ export function createAppServer() {
       });
     }
 
-    // 2b. SEO & AI Crawler Indexing: /robots.txt & /sitemap.xml (19 URLs)
+    // 2b. SEO & AI Crawler Indexing: /robots.txt & /sitemap.xml (24 tool URLs)
     if (req.method === "GET" && pathname === "/robots.txt") {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
       return res.end(`User-agent: *\nAllow: /\nSitemap: ${baseUrl}/sitemap.xml\n`);
@@ -1902,7 +1947,8 @@ export function createAppServer() {
         const route = TOOL_TO_ROUTE[t.name];
         const slug = route.replace("/v1/", "");
         const p = PRICING[route];
-        return `<tr><td><a href="/tools/${slug}" style="color:#38bdf8;text-decoration:none;"><code>${t.name}</code></a></td><td><code>POST ${route}</code></td><td><strong>$${p.priceUsd} USDC</strong></td><td>${p.description}</td></tr>`;
+        const cat = route === "/v1/buy-pass" ? "Prepaid Pass (30d)" : "Paid Per-Call";
+        return `<tr><td><a href="/tools/${slug}" style="color:#38bdf8;text-decoration:none;"><code>${t.name}</code></a></td><td><code>POST ${route}</code></td><td><strong>$${p.priceUsd} USDC</strong></td><td><code>${cat}</code></td><td>${p.description}</td></tr>`;
       }).join("");
 
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -1911,13 +1957,13 @@ export function createAppServer() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agent Kiosk — 23-in-1 x402 v2 & MCP Intelligence, Action & Compliance API</title>
-  <meta name="description" content="Instant pay-per-call B2A data, DeFi Swap/Bridge Calldata Builder, AML/OFAC Compliance Screening, Token 360 Due Diligence, B2B Dossiers, Whale Portfolio Radar, and B2B leads via x402 (Base USDC) and MCP." />
+  <title>Agent Kiosk — 24-in-1 x402 v2 & MCP Intelligence, Action & Compliance API</title>
+  <meta name="description" content="Instant pay-per-call B2A data (23 paid per-call endpoints + 1 $5.00 30-day prepaid pass): DeFi Swap/Bridge Calldata Builder, AML/OFAC Compliance Screening, OpenAI-compatible LLM Chat Completions, Token 360 Due Diligence, B2B Dossiers, and Whale Portfolio Radar via x402 (Base USDC) and MCP." />
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b0f19; color:#e2e8f0; max-width:1040px; margin:0 auto; padding:32px 20px; line-height:1.6; }
     h1, h2 { color:#fff; }
     .badges a { display:inline-block; margin-right:10px; margin-bottom:8px; padding:6px 12px; border-radius:6px; background:#1e293b; color:#38bdf8; text-decoration:none; font-weight:600; font-size:14px; border:1px solid #334155; }
-    table { width:100%; border-collapse:collapse; margin:20px 0; background:#111827; border-radius:8px; overflow:hidden; }
+    table { width:100%; border-collapse:collapse; margin:20px 0; background:#111827; border-radius:8px; overflow-hidden; }
     th, td { padding:12px 14px; text-align:left; border-bottom:1px solid #1f2937; font-size:14px; }
     th { background:#1e293b; color:#94a3b8; }
     code { background:#1e293b; color:#38bdf8; padding:2px 6px; border-radius:4px; font-size:13px; }
@@ -1925,19 +1971,20 @@ export function createAppServer() {
   </style>
 </head>
 <body>
-  <h1>⚡ Agent Kiosk — 23-in-1 Autonomous B2A Intelligence, Action & Compliance Supermarket</h1>
-  <p>No API keys, no sign-ups, no monthly subscriptions. Built for autonomous AI agents paying per request via <strong>x402 v2 (Base USDC)</strong> or connecting via <strong>Model Context Protocol (MCP)</strong>.</p>
+  <h1>⚡ Agent Kiosk — 24-in-1 Autonomous B2A Intelligence, Action & Compliance Supermarket</h1>
+  <p>No API keys, no sign-ups, no monthly subscriptions. Built for autonomous AI agents paying per request via <strong>x402 v2 (Base USDC)</strong> across <strong>23 paid per-call endpoints</strong> + <strong>1 30-day Prepaid Pass</strong> (plus free routes), or connecting via <strong>Model Context Protocol (MCP)</strong>.</p>
   <div class="badges">
-    <a href="https://www.x402scan.com/server/a1af2789-615a-4324-b3f1-83b97834ece8">🔵 x402scan (19/19 Verified)</a>
+    <a href="https://www.x402scan.com/server/a1af2789-615a-4324-b3f1-83b97834ece8">🔵 x402scan (24/24 Verified)</a>
     <a href="https://glama.ai/mcp/servers/ralf9090/agent-kiosk">🟢 Glama.ai (Rated A)</a>
     <a href="https://smithery.ai/servers/batuhansenavci/agent-kiosk">🟠 Smithery.ai</a>
     <a href="/stats">📊 Live Agent & Wallet Dashboard (/stats)</a>
     <a href="/openapi.json">📄 OpenAPI 3.1</a>
-    <a href="/llms-full.txt">🤖 /llms-full.txt</a>
+    <a href="/llms.txt">🤖 /llms.txt</a>
+    <a href="/llms-full.txt">📘 /llms-full.txt</a>
   </div>
-  <h2>19 Live Attested Endpoints & MCP Tools (Base Mainnet USDC)</h2>
+  <h2>24 Live Attested x402 Endpoints & MCP Tools (23 Paid Per-Call + 1 Prepaid Pass)</h2>
   <table>
-    <thead><tr><th>MCP Tool</th><th>x402 Endpoint</th><th>Price</th><th>Description</th></tr></thead>
+    <thead><tr><th>MCP Tool</th><th>x402 Endpoint</th><th>Price</th><th>Category</th><th>Description</th></tr></thead>
     <tbody>${toolRows}</tbody>
   </table>
   <h2>Quick Connect (MCP Client / Claude / Cursor / VS Code)</h2>
@@ -1965,12 +2012,54 @@ export function createAppServer() {
         x402Version: 2,
         attested: true,
         description:
-          "23-in-1 Autonomous B2A Data, Executable DeFi Calldata, AML Compliance & Security Supermarket via x402 v2 (Base USDC) and MCP.",
+          "24-in-1 Autonomous B2A Data, Executable DeFi Calldata, AML Compliance & LLM Supermarket (23 paid per-call endpoints + 1 $5.00 30-day Prepaid Pass, plus free routes) via x402 v2 (Base USDC) and MCP.",
         protocols: ["x402", "mcp", "rest"],
         payment: {
           network: CONFIG.network,
           asset: CONFIG.usdcAsset,
+          decimals: 6,
           payTo: CONFIG.payToWallet,
+          facilitators: {
+            primary: {
+              name: "PayAI Network",
+              baseUrl: "https://facilitator.payai.network",
+              supported: "https://facilitator.payai.network/supported",
+              verify: "https://facilitator.payai.network/verify",
+              settle: "https://facilitator.payai.network/settle",
+            },
+            fallbacks: [
+              {
+                name: "Dexter",
+                baseUrl: "https://facilitator.dexter.cash",
+                supported: "https://facilitator.dexter.cash/supported",
+                verify: "https://facilitator.dexter.cash/verify",
+                settle: "https://facilitator.dexter.cash/settle",
+              },
+              {
+                name: "Mogami (x402 v1)",
+                baseUrl: "https://facilitator.mogami.tech",
+                supported: "https://facilitator.mogami.tech/supported",
+                verify: "https://facilitator.mogami.tech/verify",
+                settle: "https://facilitator.mogami.tech/settle",
+              },
+            ],
+          },
+        },
+        route_breakdown: {
+          total_x402_endpoints: 24,
+          paid_per_call_endpoints: 23,
+          prepaid_pass_endpoints: 1,
+          free_routes: [
+            `POST ${baseUrl}/v1/free-swap`,
+            `GET ${baseUrl}/v1/models`,
+            `GET ${baseUrl}/v1/stats`,
+            `GET ${baseUrl}/stats`,
+            `POST ${baseUrl}/mcp`,
+            `GET ${baseUrl}/.well-known/x402.json`,
+            `GET ${baseUrl}/openapi.json`,
+            `GET ${baseUrl}/llms.txt`,
+            `GET ${baseUrl}/llms-full.txt`,
+          ],
         },
         resources: Object.keys(ROUTE_HANDLERS).map((r) => `${baseUrl}${r}`),
         endpoints: PRICING,

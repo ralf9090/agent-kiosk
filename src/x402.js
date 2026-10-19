@@ -1,6 +1,6 @@
 /**
  * x402 v2 & v1 Payment Protocol Middleware, Stateless Prepaid Pass & Multi-Facilitator Mainnet Settlement Layer
- * Supports 16 high-demand B2A endpoints (12 core tools, 3 $0.10 deep combo reports, 1 $5.00 30-day API Pass) on Base Mainnet.
+ * Supports 24 x402 B2A endpoints (23 paid per-call intelligence, action & LLM tools + 1 $5.00 30-day API Pass) on Base Mainnet.
  */
 import crypto from "node:crypto";
 
@@ -678,7 +678,7 @@ export const PRICING = {
     priceUsd: "5.00",
     amount: "5000000", // 5.00 USDC
     description:
-      "Instant 30-Day Prepaid API Key Pass (ak_live_...) for AI agents, LangChain, n8n, Make.com, and developers. Unlocks all 23 Agent Kiosk REST & MCP intelligence tools for 30 days via X-API-KEY header without per-call x402 signing.",
+      "Instant 30-Day Prepaid API Key Pass (ak_live_...) for AI agents, LangChain, n8n, Make.com, and developers. Unlocks all 23 paid per-call Agent Kiosk REST & MCP intelligence tools for 30 days via X-API-KEY header without per-call x402 signing.",
     mimeType: "application/json",
     tags: ["prepaid", "api-key", "pass", "subscription", "access", "agents", "mcp", "attested"],
     exampleInput: { agent_name: "my-autonomous-agent" },
