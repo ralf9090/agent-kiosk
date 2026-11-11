@@ -6,8 +6,22 @@
   "type": "module",
   "main": "src/server.js",
   "bin": {
-    "agent-kiosk-mcp": "./src/mcp-stdio.js"
+    "agent-kiosk": "src/mcp-stdio.js",
+    "agent-kiosk-mcp": "src/mcp-stdio.js"
   },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE",
+    "glama.json",
+    "smithery.yaml",
+    "server.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ralf9090/agent-kiosk.git"
+  },
+  "homepage": "https://agent-kiosk.vercel.app",
   "scripts": {
     "build": "node --check src/mcp-stdio.js && mkdir -p public && cp .wellknown-verify public/",
     "start": "node src/server.js",
