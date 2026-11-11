@@ -49,9 +49,34 @@ export const TELEMETRY = {
   paid_calls_succeeded: 0,
   external_paid_calls: 1, // Verified external EIP-3009 sale at Base Block 52737689 (TX: 0x703e3a59... from 0xc6699d2a...)
   claimed_tx_hashes: [],
+  partner_tools: {},
   by_route: {},
   recent_events: [],
 };
+
+function validateSafeExternalHttpsUrl(rawUrl) {
+  let u;
+  try {
+    u = new URL(String(rawUrl || "").trim());
+  } catch {
+    throw new Error("Invalid URL format (must be a full https:// URL).");
+  }
+  if (u.protocol !== "https:") {
+    throw new Error("Only https:// URLs are permitted.");
+  }
+  const host = u.hostname.toLowerCase();
+  if (
+    !host.includes(".") ||
+    host === "localhost" ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.startsWith("[") ||
+    /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(host)
+  ) {
+    throw new Error("Private, loopback, or internal hostnames are not permitted.");
+  }
+  return u;
+}
 
 // Daily per-client MCP trial tracker (2 free full calls/day for real MCP clients)
 const DAILY_MCP_TRIALS = new Map();
@@ -142,6 +167,23 @@ export async function ensureTelemetryLoaded(force = false) {
       ]);
       TELEMETRY.claimed_tx_hashes = Array.from(mergedClaims).slice(-500);
     }
+    if (cloud.partner_tools && typeof cloud.partner_tools === "object") {
+      for (const [slug, tool] of Object.entries(cloud.partner_tools)) {
+        const cur = TELEMETRY.partner_tools[slug];
+        if (!cur) {
+          TELEMETRY.partner_tools[slug] = tool;
+        } else {
+          TELEMETRY.partner_tools[slug] = {
+            ...tool,
+            ...cur,
+            calls_paid: Math.max(cur.calls_paid || 0, tool.calls_paid || 0),
+            gross_usdc: Math.max(cur.gross_usdc || 0, tool.gross_usdc || 0),
+            seller_earned_usdc: Math.max(cur.seller_earned_usdc || 0, tool.seller_earned_usdc || 0),
+            kiosk_fee_usdc: Math.max(cur.kiosk_fee_usdc || 0, tool.kiosk_fee_usdc || 0),
+          };
+        }
+      }
+    }
 
     for (const [r, stats] of Object.entries(cloud.by_route || {})) {
       const local = TELEMETRY.by_route[r] || { challenges: 0, teasers: 0, paid: 0 };
@@ -186,6 +228,7 @@ async function flushTelemetryToCloud(isImportant = false) {
       paid_calls_succeeded: TELEMETRY.paid_calls_succeeded,
       external_paid_calls: TELEMETRY.external_paid_calls,
       claimed_tx_hashes: (TELEMETRY.claimed_tx_hashes || []).slice(-500),
+      partner_tools: TELEMETRY.partner_tools || {},
       by_route: TELEMETRY.by_route,
       recent_events: TELEMETRY.recent_events.slice(0, 100),
     };
@@ -2044,14 +2087,15 @@ export function createAppServer() {
   <h1>⚡ Agent Kiosk — 24-in-1 Autonomous B2A Intelligence, Action & Compliance Supermarket</h1>
   <p>No API keys, no sign-ups, no monthly subscriptions. Built for autonomous AI agents paying per request via <strong>x402 v2 (Base USDC)</strong> across <strong>23 paid per-call endpoints</strong> + <strong>1 30-day Prepaid Pass</strong> (plus free routes), or connecting via <strong>Model Context Protocol (MCP)</strong>.</p>
   <div class="badges">
-    <a href="/buy" style="background:#065f46;color:#ecfdf5;border-color:#10b981;">⚡ Instant API Pass ($1 Starter / $5 Pro) & Sponsored Slots</a>
+    <a href="/buy" style="background:#065f46;color:#ecfdf5;border-color:#10b981;">⚡ Instant API Pass ($1 Starter / $5 Pro)</a>
+    <a href="/sell" style="background:#3b0764;color:#f3e8ff;border-color:#a855f7;">🏪 Sell Your API on Kiosk (15% Fee)</a>
+    <a href="/audit" style="background:#1e3a8a;color:#dbeafe;border-color:#3b82f6;">🔍 Free x402 & MCP Server Auditor</a>
     <a href="https://www.x402scan.com/server/a1af2789-615a-4324-b3f1-83b97834ece8">🔵 x402scan (24/24 Verified)</a>
     <a href="https://glama.ai/mcp/servers/ralf9090/agent-kiosk">🟢 Glama.ai (Rated A)</a>
     <a href="https://smithery.ai/servers/batuhansenavci/agent-kiosk">🟠 Smithery.ai</a>
     <a href="/stats">📊 Live Agent & Wallet Dashboard (/stats)</a>
     <a href="/openapi.json">📄 OpenAPI 3.1</a>
     <a href="/llms.txt">🤖 /llms.txt</a>
-    <a href="/llms-full.txt">📘 /llms-full.txt</a>
   </div>
   <h2>24 Live Attested x402 Endpoints & MCP Tools (23 Paid Per-Call + 1 Prepaid Pass)</h2>
   <table>
@@ -2433,6 +2477,504 @@ export function createAppServer() {
         });
       } catch (err) {
         return sendJson(res, 400, { ok: false, error: err.message });
+      }
+    }
+
+    // 3a-3. Free x402 & MCP Server Readiness Auditor (/audit & POST /v1/x402-audit)
+    if (req.method === "GET" && pathname === "/audit") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>x402 & MCP Readiness Auditor — Agent Kiosk</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b0f19; color:#e2e8f0; max-width:880px; margin:0 auto; padding:28px 18px; line-height:1.55; }
+    h1, h2, h3 { color:#fff; margin-top:0; }
+    a { color:#38bdf8; text-decoration:none; }
+    .box { background:#111827; border:1px solid #1f2937; border-radius:12px; padding:20px; margin:18px 0; }
+    input[type="text"] { width:100%; box-sizing:border-box; padding:12px; border-radius:8px; border:1px solid #334155; background:#0b0f19; color:#f8fafc; font-family:monospace; font-size:14px; margin:8px 0 12px; }
+    .btn { display:inline-block; background:#3b82f6; color:#fff; font-weight:700; border:none; padding:12px 20px; border-radius:8px; font-size:15px; cursor:pointer; text-decoration:none; margin-right:8px; }
+    .btn.green { background:#10b981; color:#052e16; }
+    pre { background:#090d16; padding:14px; border-radius:8px; overflow-x:auto; border:1px solid #1e293b; color:#a7f3d0; font-size:13px; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← Back to 24 Tools</a> | <a href="/sell">🏪 Sell Your API on Kiosk (15% Fee)</a> | <a href="/buy">⚡ Get API Pass / $49 Featured Slot</a></p>
+  <h1>🔍 Free x402 v2, Bazaar & MCP Server Readiness Auditor</h1>
+  <p style="color:#94a3b8;">Check why x402scan, Coinbase Bazaar, Glama, or Smithery rejects or downranks your server. Tests HTTP 402 latency, CAIP-2 <code>eip155:8453</code>, v1/v2 <code>maxAmountRequired</code>, MCP Streamable-HTTP, and A2A cards.</p>
+  <div class="box">
+    <label style="font-weight:600;">Paste your paid x402 endpoint or base HTTPS URL:</label>
+    <input type="text" id="targetUrl" placeholder="https://your-server.com/v1/endpoint" value="https://agent-kiosk.vercel.app/v1/ping" />
+    <button class="btn" onclick="runAudit()">🔍 Run Live Protocol Audit</button>
+    <div id="status" style="margin-top:12px;color:#38bdf8;"></div>
+  </div>
+  <div class="box" id="auditOutBox" style="display:none;">
+    <h2 id="gradeHeader"></h2>
+    <pre id="auditJson"></pre>
+    <p style="margin-top:16px;">
+      <a class="btn green" href="/sell">🏪 Wrap & Monetize Your API on Kiosk (0 Upfront · 15% Fee)</a>
+      <a class="btn" href="/buy">🏆 Feature Your Server to 260k+ Agent Calls ($49/mo)</a>
+    </p>
+  </div>
+  <script>
+    async function runAudit() {
+      const url = document.getElementById("targetUrl").value.trim();
+      const st = document.getElementById("status");
+      st.innerText = "Scanning 402 headers, CAIP-2 schema, /.well-known/x402.json, /mcp, and A2A card...";
+      try {
+        const res = await fetch("/v1/x402-audit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+        document.getElementById("auditOutBox").style.display = "block";
+        document.getElementById("gradeHeader").innerText = data.ok
+          ? "Score: " + data.score_100 + "/100 (Grade " + data.grade + ")"
+          : "Audit Error";
+        document.getElementById("auditJson").innerText = JSON.stringify(data, null, 2);
+        st.innerText = "Audit complete.";
+      } catch (e) {
+        st.innerText = "Error: " + e.message;
+      }
+    }
+  </script>
+</body>
+</html>`);
+    }
+
+    if (req.method === "POST" && pathname === "/v1/x402-audit") {
+      try {
+        const body = await readJsonBody(req);
+        const target = validateSafeExternalHttpsUrl(body.url);
+        const origin = target.origin;
+        const checks = [];
+        let score = 0;
+
+        const t0 = performance.now();
+        let res402 = null;
+        try {
+          res402 = await fetch(target.toString(), {
+            method: "GET",
+            redirect: "manual",
+            headers: { "User-Agent": "AgentKiosk-x402-Auditor/2.6" },
+            signal: AbortSignal.timeout(4500),
+          });
+        } catch (err) {
+          checks.push({ check: "endpoint_reachable", pass: false, detail: err.message });
+        }
+        const latencyMs = Math.round(performance.now() - t0);
+
+        if (res402) {
+          const is402 = res402.status === 402;
+          if (is402) score += 25;
+          checks.push({
+            check: "http_402_status",
+            pass: is402,
+            detail: `Returned HTTP ${res402.status} in ${latencyMs}ms`,
+          });
+
+          const fast = latencyMs <= 350;
+          if (fast) score += 10;
+          checks.push({
+            check: "probe_latency_under_350ms",
+            pass: fast,
+            detail: `${latencyMs}ms (indexers penalize >350ms cold 402 responses)`,
+          });
+
+          const prHeader = res402.headers.get("payment-required") || res402.headers.get("x-payment-required");
+          let parsedChallenge = null;
+          if (prHeader) {
+            try {
+              parsedChallenge = JSON.parse(Buffer.from(prHeader, "base64").toString("utf8"));
+            } catch {
+              parsedChallenge = null;
+            }
+          }
+          if (!parsedChallenge) {
+            try {
+              parsedChallenge = await res402.json();
+            } catch {
+              parsedChallenge = null;
+            }
+          }
+
+          const hasHeader = Boolean(prHeader);
+          if (hasHeader) score += 15;
+          checks.push({
+            check: "payment_required_base64_header",
+            pass: hasHeader,
+            detail: hasHeader ? "PAYMENT-REQUIRED header present" : "Missing PAYMENT-REQUIRED Base64 header (x402 v2 requirement)",
+          });
+
+          const acc = parsedChallenge?.accepts?.[0] || {};
+          const strictCaip2 = /^eip155:\d+/.test(String(acc.network || ""));
+          if (strictCaip2) score += 15;
+          checks.push({
+            check: "caip2_network_format",
+            pass: strictCaip2,
+            detail: strictCaip2
+              ? `Valid CAIP-2 network (${acc.network})`
+              : `Invalid/legacy network '${acc.network || "none"}' — x402scan requires strict CAIP-2 like 'eip155:8453'`,
+          });
+
+          const hasDualAmount = Boolean(acc.amount && acc.maxAmountRequired);
+          if (hasDualAmount) score += 10;
+          checks.push({
+            check: "dual_v1_v2_amount_fields",
+            pass: hasDualAmount,
+            detail: hasDualAmount
+              ? "Both 'amount' (v2) and 'maxAmountRequired' (v1) present"
+              : "Include both 'amount' and 'maxAmountRequired' in accepts[0] so v1 & v2 buyers both succeed",
+          });
+        }
+
+        const [wkRes, mcpRes, cardRes] = await Promise.allSettled([
+          fetch(`${origin}/.well-known/x402.json`, { redirect: "manual", signal: AbortSignal.timeout(3500) }),
+          fetch(`${origin}/mcp`, {
+            method: "POST",
+            redirect: "manual",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+            signal: AbortSignal.timeout(3500),
+          }),
+          fetch(`${origin}/.well-known/agent-card.json`, { redirect: "manual", signal: AbortSignal.timeout(3500) }),
+        ]);
+
+        const hasWellKnown = wkRes.status === "fulfilled" && wkRes.value.status === 200;
+        if (hasWellKnown) score += 10;
+        checks.push({
+          check: "well_known_x402_manifest",
+          pass: hasWellKnown,
+          detail: hasWellKnown ? "/.well-known/x402.json found" : "Missing /.well-known/x402.json discovery manifest",
+        });
+
+        let hasMcp = false;
+        if (mcpRes.status === "fulfilled" && mcpRes.value.status === 200) {
+          try {
+            const mj = await mcpRes.value.json();
+            hasMcp = Array.isArray(mj?.result?.tools) && mj.result.tools.length > 0;
+          } catch {
+            hasMcp = false;
+          }
+        }
+        if (hasMcp) score += 10;
+        checks.push({
+          check: "mcp_streamable_http_tools",
+          pass: hasMcp,
+          detail: hasMcp
+            ? "/mcp JSON-RPC tools/list active"
+            : "No /mcp server — you are missing Claude, Cursor, Smithery & Glama traffic! Wrap your API at /sell in 30s.",
+        });
+
+        const hasA2a = cardRes.status === "fulfilled" && cardRes.value.status === 200;
+        if (hasA2a) score += 5;
+        checks.push({
+          check: "google_a2a_agent_card",
+          pass: hasA2a,
+          detail: hasA2a ? "/.well-known/agent-card.json found" : "Missing /.well-known/agent-card.json",
+        });
+
+        const grade =
+          score >= 95 ? "A+" : score >= 85 ? "A" : score >= 70 ? "B" : score >= 50 ? "C" : "D";
+        await recordTelemetry("x402_audit", "/v1/x402-audit", req, `${target.hostname}:${score}`);
+
+        return sendJson(res, 200, {
+          ok: true,
+          audited_url: target.toString(),
+          score_100: score,
+          grade,
+          checks,
+          instant_distribution_offers: {
+            zero_upfront_commission_proxy: `${baseUrl}/sell`,
+            featured_mcp_slot_49_usdc: `${baseUrl}/buy`,
+          },
+        });
+      } catch (err) {
+        return sendJson(res, 400, { ok: false, error: err.message });
+      }
+    }
+
+    // 3a-4. "x402 Shopify" Partner API Marketplace & 15% Commission Router (/sell, /v1/partner-register, /v1/partners, /p/:slug)
+    if (req.method === "GET" && pathname === "/sell") {
+      await ensureTelemetryLoaded(false);
+      const partnerList = Object.values(TELEMETRY.partner_tools || {});
+      const partnerRows = partnerList
+        .map(
+          (p) =>
+            `<tr><td><code>/p/${p.slug}</code></td><td>${p.name}</td><td>$${p.price_usdc} USDC</td><td>${p.calls_paid || 0}</td><td>${p.description}</td></tr>`
+        )
+        .join("");
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sell Your API via x402 & Prepaid Pass — Agent Kiosk Marketplace</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b0f19; color:#e2e8f0; max-width:900px; margin:0 auto; padding:28px 18px; line-height:1.55; }
+    h1, h2, h3 { color:#fff; margin-top:0; }
+    a { color:#38bdf8; text-decoration:none; }
+    .box { background:#111827; border:1px solid #1f2937; border-radius:12px; padding:20px; margin:18px 0; }
+    input[type="text"], input[type="number"] { width:100%; box-sizing:border-box; padding:10px 12px; border-radius:8px; border:1px solid #334155; background:#0b0f19; color:#f8fafc; font-size:14px; margin:6px 0 12px; }
+    .btn { display:inline-block; background:#a855f7; color:#fff; font-weight:700; border:none; padding:12px 20px; border-radius:8px; font-size:15px; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; margin-top:12px; background:#111827; border-radius:8px; overflow-hidden; }
+    th, td { padding:10px 12px; text-align:left; border-bottom:1px solid #1f2937; font-size:13px; }
+    th { background:#1e293b; color:#94a3b8; }
+    code, pre { background:#090d16; color:#38bdf8; padding:2px 6px; border-radius:4px; font-family:monospace; }
+    pre { padding:14px; overflow-x:auto; color:#a7f3d0; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← Back to 24 Tools</a> | <a href="/audit">🔍 Audit Your x402 Server</a> | <a href="/buy">🏆 $49 Featured MCP Slot</a></p>
+  <h1>🏪 Turn Any HTTPS Endpoint into a Paid x402 v2 + Attested API in 30 Seconds</h1>
+  <p style="color:#94a3b8;">Zero setup, zero facilitator headaches. Agent Kiosk wraps your HTTPS endpoint with <strong>x402 v2 & v1 Base USDC settlement (PayAI + Dexter failover)</strong>, <strong>Prepaid Pass compatibility</strong>, and <strong>HMAC-SHA256 cryptographic attestation</strong>. You earn <strong>85%</strong> of every per-call x402 settlement; Agent Kiosk retains a flat <strong>15% platform fee</strong>.</p>
+
+  <div class="box">
+    <h3>Register Your Endpoint (Instant Live Proxy at <code>/p/&lt;slug&gt;</code>)</h3>
+    <label>Tool Slug (lowercase letters, numbers, hyphens):</label>
+    <input type="text" id="slug" placeholder="e.g. solana-whale-alerts" />
+    <label>Tool Name:</label>
+    <input type="text" id="name" placeholder="e.g. Solana Whale Alert Feed" />
+    <label>Short Description (shown in x402 Bazaar & discovery):</label>
+    <input type="text" id="desc" placeholder="Real-time whale transfers and DEX liquidity alerts." />
+    <label>Your Upstream HTTPS URL (receives GET/POST query & JSON body):</label>
+    <input type="text" id="upstream" placeholder="https://api.yourdomain.com/v1/alerts" />
+    <label>Price per Call in USDC ($0.005 – $5.00):</label>
+    <input type="number" id="price" step="0.005" value="0.02" />
+    <label>Your Base Mainnet Payout Wallet (<code>0x...</code> — receives 85% payout):</label>
+    <input type="text" id="wallet" placeholder="0x..." />
+    <button class="btn" onclick="registerPartner()">🚀 Launch Paid Endpoint Now</button>
+    <div id="regMsg" style="margin-top:12px;color:#38bdf8;"></div>
+    <pre id="regOut" style="display:none;margin-top:12px;"></pre>
+  </div>
+
+  <h2>Active Partner Endpoints (${partnerList.length})</h2>
+  <table>
+    <thead><tr><th>Route</th><th>Name</th><th>Price</th><th>Paid Calls</th><th>Description</th></tr></thead>
+    <tbody>${partnerRows || '<tr><td colspan="5">Be the first partner endpoint listed!</td></tr>'}</tbody>
+  </table>
+
+  <script>
+    async function registerPartner() {
+      const msg = document.getElementById("regMsg");
+      const out = document.getElementById("regOut");
+      msg.innerText = "Verifying upstream HTTPS endpoint & creating x402 route...";
+      try {
+        const res = await fetch("/v1/partner-register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            slug: document.getElementById("slug").value.trim(),
+            name: document.getElementById("name").value.trim(),
+            description: document.getElementById("desc").value.trim(),
+            upstream_url: document.getElementById("upstream").value.trim(),
+            price_usdc: document.getElementById("price").value.trim(),
+            seller_wallet: document.getElementById("wallet").value.trim()
+          })
+        });
+        const data = await res.json();
+        out.style.display = "block";
+        out.innerText = JSON.stringify(data, null, 2);
+        msg.innerText = data.ok ? "✅ Live! Test your x402 endpoint now." : "❌ " + data.error;
+      } catch (e) {
+        msg.innerText = "❌ " + e.message;
+      }
+    }
+  </script>
+</body>
+</html>`);
+    }
+
+    if (req.method === "GET" && pathname === "/v1/partners") {
+      await ensureTelemetryLoaded(false);
+      const list = Object.values(TELEMETRY.partner_tools || {}).map((p) => ({
+        slug: p.slug,
+        name: p.name,
+        description: p.description,
+        kiosk_x402_endpoint: `${baseUrl}/p/${p.slug}`,
+        price_usdc: p.price_usdc,
+        seller_wallet: p.seller_wallet,
+        revenue_split: "85% seller / 15% Agent Kiosk",
+        calls_paid: p.calls_paid || 0,
+        gross_usdc: p.gross_usdc || 0,
+      }));
+      return sendJson(res, 200, { ok: true, count: list.length, partners: list });
+    }
+
+    if (req.method === "POST" && pathname === "/v1/partner-register") {
+      try {
+        await ensureTelemetryLoaded(true);
+        const body = await readJsonBody(req);
+        const slug = String(body.slug || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9-]/g, "");
+        if (slug.length < 3 || slug.length > 40) {
+          return sendJson(res, 400, {
+            ok: false,
+            error: "slug must be 3–40 lowercase alphanumeric/hyphen characters.",
+          });
+        }
+        if (TELEMETRY.partner_tools[slug]) {
+          return sendJson(res, 409, {
+            ok: false,
+            error: `Partner slug '${slug}' is already registered.`,
+          });
+        }
+        const upstreamUrl = validateSafeExternalHttpsUrl(body.upstream_url);
+        if (upstreamUrl.hostname.endsWith("agent-kiosk.vercel.app")) {
+          return sendJson(res, 400, { ok: false, error: "Upstream cannot loop back to Agent Kiosk." });
+        }
+        const sellerWallet = String(body.seller_wallet || "").trim();
+        if (!/^0x[a-fA-F0-9]{40}$/.test(sellerWallet)) {
+          return sendJson(res, 400, {
+            ok: false,
+            error: "Provide a valid 0x Base Mainnet payout address.",
+          });
+        }
+        const priceNum = Number(body.price_usdc || 0.02);
+        if (!Number.isFinite(priceNum) || priceNum < 0.002 || priceNum > 5.0) {
+          return sendJson(res, 400, {
+            ok: false,
+            error: "price_usdc must be between 0.002 and 5.00 USDC.",
+          });
+        }
+        const name = String(body.name || slug).trim().slice(0, 80);
+        const description = String(body.description || `${name} via Agent Kiosk x402 Router`)
+          .trim()
+          .slice(0, 240);
+        const amountAtomic = String(Math.round(priceNum * 1_000_000));
+        const priceFormatted = priceNum.toFixed(priceNum < 0.01 ? 3 : 2);
+
+        const entry = {
+          slug,
+          name,
+          description,
+          upstream_url: upstreamUrl.toString(),
+          price_usdc: priceFormatted,
+          amount_atomic: amountAtomic,
+          seller_wallet: sellerWallet,
+          created_at_utc: new Date().toISOString(),
+          calls_paid: 0,
+          gross_usdc: 0,
+          seller_earned_usdc: 0,
+          kiosk_fee_usdc: 0,
+        };
+        if (Object.keys(TELEMETRY.partner_tools).length >= 200) {
+          return sendJson(res, 507, { ok: false, error: "Partner directory capacity reached." });
+        }
+        TELEMETRY.partner_tools[slug] = entry;
+        await recordTelemetry("partner_registered", `/p/${slug}`, req, `${name} ($${priceFormatted})`);
+        await flushTelemetryToCloud(true);
+
+        return sendJson(res, 200, {
+          ok: true,
+          partner_endpoint: `${baseUrl}/p/${slug}`,
+          revenue_split: { seller_pct: 85, kiosk_platform_fee_pct: 15 },
+          entry: {
+            slug,
+            name,
+            description,
+            price_usdc: priceFormatted,
+            seller_wallet: sellerWallet,
+          },
+        });
+      } catch (err) {
+        return sendJson(res, 400, { ok: false, error: err.message });
+      }
+    }
+
+    if ((req.method === "POST" || req.method === "GET") && pathname.startsWith("/p/")) {
+      await ensureTelemetryLoaded(false);
+      const slug = pathname.slice(3).toLowerCase().replace(/[^a-z0-9-]/g, "");
+      const partner = TELEMETRY.partner_tools?.[slug];
+      if (!partner) {
+        return sendJson(res, 404, {
+          ok: false,
+          error: `Partner endpoint '/p/${slug}' not found. Register yours in 30s at ${baseUrl}/sell`,
+        });
+      }
+      const customSpec = {
+        priceUsd: partner.price_usdc,
+        amount: partner.amount_atomic,
+        description: `${partner.name}: ${partner.description}`,
+        mimeType: "application/json",
+        tags: ["partner", "x402", "b2a", "attested"],
+      };
+      const resourceUrl = `${baseUrl}/p/${slug}`;
+      const auth = await verifyAndSettlePayment(req, `/p/${slug}`, resourceUrl, {}, customSpec);
+      if (!auth.authorized) {
+        await recordTelemetry("x402_challenge", `/p/${slug}`, req, `$${partner.price_usdc} USDC`);
+        return sendJson(res, auth.statusCode, auth.challenge, {
+          "PAYMENT-REQUIRED": auth.challengeHeader,
+        });
+      }
+      try {
+        const upstreamTarget = validateSafeExternalHttpsUrl(partner.upstream_url);
+        for (const [k, v] of urlObj.searchParams.entries()) {
+          if (k !== "api_key" && k !== "x_api_key") upstreamTarget.searchParams.set(k, v);
+        }
+        const jsonBody = req.method === "POST" ? await readJsonBody(req) : null;
+        const upRes = await fetch(upstreamTarget.toString(), {
+          method: req.method,
+          redirect: "manual",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            ...(req.method === "POST" ? { "Content-Type": "application/json" } : {}),
+            "User-Agent": "AgentKiosk-PartnerRouter/2.6",
+            "X-Kiosk-Partner-Slug": slug,
+          },
+          ...(req.method === "POST" ? { body: JSON.stringify(jsonBody || {}) } : {}),
+          signal: AbortSignal.timeout(8500),
+        });
+        const rawText = await upRes.text();
+        let parsedData;
+        try {
+          parsedData = JSON.parse(rawText);
+        } catch {
+          parsedData = { status: upRes.status, raw_text: rawText.slice(0, 12000) };
+        }
+        if (auth.mode === "x402") {
+          const gross = Number(partner.price_usdc);
+          partner.calls_paid = (partner.calls_paid || 0) + 1;
+          partner.gross_usdc = Number(((partner.gross_usdc || 0) + gross).toFixed(6));
+          partner.seller_earned_usdc = Number(
+            ((partner.seller_earned_usdc || 0) + gross * 0.85).toFixed(6)
+          );
+          partner.kiosk_fee_usdc = Number(
+            ((partner.kiosk_fee_usdc || 0) + gross * 0.15).toFixed(6)
+          );
+        } else {
+          partner.calls_paid = (partner.calls_paid || 0) + 1;
+        }
+        await recordTelemetry("external_paid_call", `/p/${slug}`, req, `partner:${auth.mode}`);
+        await flushTelemetryToCloud(true);
+        const attestation = attestResponse(`/p/${slug}`, parsedData);
+        const extraHeaders = auth.settlementHeader
+          ? {
+              "PAYMENT-RESPONSE": auth.settlementHeader,
+              "X-PAYMENT-RESPONSE": auth.settlementHeader,
+            }
+          : {};
+        return sendJson(
+          res,
+          200,
+          {
+            ok: true,
+            partner_slug: slug,
+            payment_mode: auth.mode,
+            tx_hash: auth.txHash || undefined,
+            attestation,
+            data: parsedData,
+          },
+          extraHeaders
+        );
+      } catch (err) {
+        return sendJson(res, 502, { ok: false, error: `Upstream partner error: ${err.message}` });
       }
     }
 

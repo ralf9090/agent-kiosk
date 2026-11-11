@@ -61,6 +61,8 @@ All `/v1/*` routes accept `POST` (primary JSON body) and `GET` (query parameters
 | Route | Method | Price | Purpose |
 |-------|--------|-------|---------|
 | `/buy`, `/partners` | `GET` | `$1` / `$5` / `$49` | Self-serve instant API key checkout (`$1` 7-day Starter, `$5` 30-day Pro, `$49` Sponsored MCP Tool Slot) via 1-click wallet, Apple Pay/Card Onramp, or exchange transfer. |
+| `/sell`, `/p/:slug` | `GET` / `POST` | 15% Fee | **x402 Partner Marketplace:** Wrap any HTTPS API into a paid Base USDC x402 v2 + Prepaid Pass + attested endpoint in 30s (`85%` seller / `15%` Agent Kiosk). |
+| `/audit`, `/v1/x402-audit` | `GET` / `POST` | `$0.00` | Free live x402 v2, CAIP-2, Bazaar, MCP & A2A readiness auditor (`0–100` score). |
 | `/v1/claim-pass` | `POST` | On-chain TX | Zero-extension pass minter: verifies any Base USDC transfer (`tx_hash`) to `payToWallet` and returns a signed `ak_live_...` pass + `?api_key=` MCP URL. |
 | `/v1/free-swap` | `POST` / `GET` | `$0.00` | Zero-paywall executable DEX swap & cross-chain bridge calldata builder (monetized via 0.25% on-chain partner fee to `payToWallet`). |
 | `/v1/models` | `GET` | `$0.00` | OpenAI-compatible model list discovery (`gpt-4o-mini`, `openai`, `deepseek-chat`). |

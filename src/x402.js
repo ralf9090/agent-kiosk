@@ -910,8 +910,8 @@ function decodePaymentHeader(rawHeader) {
  * Build standard x402 v2 PaymentRequired response body and PAYMENT-REQUIRED base64 header
  * Includes full Coinbase CDP Bazaar & x402scan discovery metadata (serviceName, iconUrl, tags, extensions.bazaar)
  */
-export function build402Challenge(routePath, resourceUrl) {
-  const route = PRICING[routePath] || PRICING["/v1/social-search"];
+export function build402Challenge(routePath, resourceUrl, customRouteSpec = null) {
+  const route = customRouteSpec || PRICING[routePath] || PRICING["/v1/social-search"];
   const rawTags = route.tags || ["agents", "x402", "mcp", "base", "usdc"];
   const tagsWithAttested = rawTags.includes("attested") ? rawTags : [...rawTags, "attested"];
 
@@ -997,7 +997,13 @@ export function build402Challenge(routePath, resourceUrl) {
 /**
  * Verify AND settle incoming x402 v2/v1 payment header across Base Mainnet facilitators
  */
-export async function verifyAndSettlePayment(req, routePath, resourceUrl, extraAuthArgs = {}) {
+export async function verifyAndSettlePayment(
+  req,
+  routePath,
+  resourceUrl,
+  extraAuthArgs = {},
+  customRouteSpec = null
+) {
   // 1. Check explicit API_SECRET_KEY or signed Prepaid Pass (ak_live_...) via header, MCP arg, or ?api_key= query
   let queryKey = "";
   if (req?.url && req.url.includes("?")) {
@@ -1040,7 +1046,11 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl, extraA
     req.headers["x-payment-signature"] ||
     extraAuthArgs?.payment_signature ||
     extraAuthArgs?.x_payment;
-  const { body: challenge, headerBase64 } = build402Challenge(routePath, resourceUrl);
+  const { body: challenge, headerBase64 } = build402Challenge(
+    routePath,
+    resourceUrl,
+    customRouteSpec
+  );
 
   if (!paymentHeader) {
     return {
@@ -1051,7 +1061,7 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl, extraA
     };
   }
 
-  const route = PRICING[routePath] || PRICING["/v1/social-search"];
+  const route = customRouteSpec || PRICING[routePath] || PRICING["/v1/social-search"];
 
   try {
     const decoded = decodePaymentHeader(paymentHeader);
@@ -1081,6 +1091,8 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl, extraA
     const signedValNum = /^\d+$/.test(signedValStr) ? Number(signedValStr) : 0;
     const effectiveAmount = isOwnerSiftah
       ? "1000"
+      : customRouteSpec
+      ? String(customRouteSpec.amount)
       : routePath === "/v1/buy-pass" && signedValNum >= 1_000_000
       ? signedValStr
       : routePath !== "/v1/buy-pass" && signedValNum >= 1000

@@ -436,6 +436,57 @@ try {
   console.log(
     `✅ 24. Google A2A agent-card.json (${cardData.skills.length} skills), MCP Prompts (${promptsData.result.prompts.length}), and MCP Resources (${resListData.result.resources.length}) verified`
   );
+
+  // 25. Test /audit (x402 Readiness Scanner + SSRF block) & /sell (15% Commission Partner Proxy /p/:slug)
+  const auditPage = await fetch(`${base}/audit`);
+  assert.equal(auditPage.status, 200);
+  const ssrfAudit = await fetch(`${base}/v1/x402-audit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: "https://127.0.0.1/v1/ping" }),
+  });
+  assert.equal(ssrfAudit.status, 400);
+
+  const liveAuditRes = await fetch(`${base}/v1/x402-audit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: "https://agent-kiosk.vercel.app/v1/ping" }),
+  });
+  assert.equal(liveAuditRes.status, 200);
+  const liveAudit = await liveAuditRes.json();
+  assert.equal(liveAudit.ok, true);
+  assert.ok(liveAudit.score_100 >= 85);
+
+  const sellPage = await fetch(`${base}/sell`);
+  assert.equal(sellPage.status, 200);
+  const regRes = await fetch(`${base}/v1/partner-register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      slug: "demo-hn-top",
+      name: "Demo HN Top Story",
+      description: "Returns HackerNews top item IDs",
+      upstream_url: "https://hacker-news.firebaseio.com/v0/maxitem.json",
+      price_usdc: "0.02",
+      seller_wallet: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    }),
+  });
+  assert.equal(regRes.status, 200);
+
+  const unpaidPartner = await fetch(`${base}/p/demo-hn-top`);
+  assert.equal(unpaidPartner.status, 402);
+
+  const paidPartner = await fetch(`${base}/p/demo-hn-top`, {
+    headers: { "X-API-KEY": mintedKey },
+  });
+  assert.equal(paidPartner.status, 200);
+  const paidPartnerJson = await paidPartner.json();
+  assert.equal(paidPartnerJson.ok, true);
+  assert.equal(paidPartnerJson.partner_slug, "demo-hn-top");
+  assert.ok(paidPartnerJson.attestation?.signature);
+  console.log(
+    `✅ 25. /audit (Score: ${liveAudit.score_100}/100, SSRF guard) & /sell (/p/demo-hn-top 402 + attested proxy) verified`
+  );
 } finally {
   server.close();
 }
