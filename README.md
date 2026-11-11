@@ -7,6 +7,7 @@
 **Agent Kiosk** is an instant pay-per-call API and Model Context Protocol (**MCP**) server built for autonomous AI agents, trading bots, coding assistants, and research workflows on **Base Mainnet (`eip155:8453`)**. Every paid and prepaid response includes a cryptographic **SHA-256 + HMAC-SHA256 `attestation` envelope** (`attested` tag).
 
 - **Production Base URL:** `https://agent-kiosk.vercel.app`
+- **Instant Human & Bot Checkout (`$1` 7-Day Starter / `$5` 30-Day Pro / `$49` Sponsored MCP Slot):** `https://agent-kiosk.vercel.app/buy`
 - **Merchant Payment Recipient (`payTo`):** `0xd8429209Aee6A398B9707DFf5F28AAA93452eE95` (Base USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, 6 decimals)
 - **Catalogue Scope:** **24 x402-protected endpoints** (**23 paid per-call endpoints** + **1 prepaid 30-day API pass**) plus **free discovery, telemetry, MCP teaser & partner-fee swap routes**
 - **Live Telemetry & Wallet Dashboard:** `https://agent-kiosk.vercel.app/stats` (`GET /v1/stats` JSON)
@@ -59,9 +60,11 @@ All `/v1/*` routes accept `POST` (primary JSON body) and `GET` (query parameters
 
 | Route | Method | Price | Purpose |
 |-------|--------|-------|---------|
+| `/buy`, `/partners` | `GET` | `$1` / `$5` / `$49` | Self-serve instant API key checkout (`$1` 7-day Starter, `$5` 30-day Pro, `$49` Sponsored MCP Tool Slot) via 1-click wallet, Apple Pay/Card Onramp, or exchange transfer. |
+| `/v1/claim-pass` | `POST` | On-chain TX | Zero-extension pass minter: verifies any Base USDC transfer (`tx_hash`) to `payToWallet` and returns a signed `ak_live_...` pass + `?api_key=` MCP URL. |
 | `/v1/free-swap` | `POST` / `GET` | `$0.00` | Zero-paywall executable DEX swap & cross-chain bridge calldata builder (monetized via 0.25% on-chain partner fee to `payToWallet`). |
 | `/v1/models` | `GET` | `$0.00` | OpenAI-compatible model list discovery (`gpt-4o-mini`, `openai`, `deepseek-chat`). |
-| `/mcp` | `POST` / `GET` | `$0.00` (Teaser) / Paid (Full) | Streamable-HTTP MCP JSON-RPC 2.0 server (lists all 24 tools; unauthenticated `tools/call` returns an HTTP 200 1-item teaser preview + `x402_unlock_full_data` challenge, while `x402_ping` and `defi_swap_quote` return full preview data; passing `payment_signature` or `x_api_key` in tool arguments returns full unmasked data). |
+| `/mcp` | `POST` / `GET` | 2 Free/Day -> Paid | Streamable-HTTP MCP JSON-RPC 2.0 server (2 free full calls/day for real MCP clients, then instant `/buy` checkout or `?api_key=ak_live_...` zero-config URL unlock). |
 | `/v1/stats`, `/stats` | `GET` | `$0.00` | Live JSON & HTML server funnel telemetry + on-chain Base USDC wallet balance dashboard. |
 | `/.well-known/x402.json` | `GET` | `$0.00` | Machine-readable x402 v2 catalogue, facilitator configuration & route breakdown (`/.well-known/x402` and `/.well-known/agent.json` aliased). |
 | `/.well-known/agent-card.json` | `GET` | `$0.00` | Google A2A v0.3.0 Agent Card with `a2a-x402` extension. |

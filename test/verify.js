@@ -110,7 +110,7 @@ try {
     `✅ 6. /v1/security-audit verified (${auditData.data.token_info.symbol} -> Verdict: ${auditData.data.verdict})`
   );
 
-  // 7. Test authorized /v1/token-alpha
+  // 7. Test authorized /v1/token-alpha + embedded 25bps zero-paywall swap hook
   const alphaRes = await fetch(`${base}/v1/token-alpha`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-API-KEY": "test-only-secret-key" },
@@ -120,8 +120,9 @@ try {
   const alphaData = await alphaRes.json();
   assert.equal(alphaData.ok, true);
   assert.equal(alphaData.data.found, true);
+  assert.equal(alphaData.data.executable_swap.partner_fee_bps, 25);
   console.log(
-    `✅ 7. /v1/token-alpha verified (${alphaData.data.token.symbol} -> Signal: ${alphaData.data.alpha_metrics.signal})`
+    `✅ 7. /v1/token-alpha verified (${alphaData.data.token.symbol} -> Signal: ${alphaData.data.alpha_metrics.signal} + 25bps Swap Hook)`
   );
 
   // 8. Test authorized /v1/domain-intel
@@ -304,26 +305,66 @@ try {
   assert.equal(mcpData.result.tools.length, 24);
   console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 24 tools");
 
-  // 20. Test unpaid MCP tools/call returns HTTP 200 Freemium Teaser Preview + x402 unlock hook + attestation
-  const mcpCallRes = await fetch(`${base}/mcp`, {
+  // 20. Test MCP 2-Call Daily Free Trial -> 3rd Call Paywall + /buy Checkout + ?api_key= MCP Unlock
+  const makeUnpaidMcpCall = () =>
+    fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": "codex-mcp-client/test" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "maps_leads", arguments: { query: "hotel", location: "Istanbul", limit: 3 } },
+      }),
+    }).then((r) => r.json());
+
+  const trial1 = JSON.parse((await makeUnpaidMcpCall()).result.content[0].text);
+  assert.equal(trial1.tier, "FREE_DAILY_MCP_TRIAL_1_OF_2");
+  assert.equal(trial1.trial_status.free_calls_remaining_today, 1);
+  assert.ok(trial1.data.count > 0);
+
+  const trial2 = JSON.parse((await makeUnpaidMcpCall()).result.content[0].text);
+  assert.equal(trial2.tier, "FREE_DAILY_MCP_TRIAL_2_OF_2");
+  assert.equal(trial2.trial_status.free_calls_remaining_today, 0);
+
+  const locked3 = JSON.parse((await makeUnpaidMcpCall()).result.content[0].text);
+  assert.equal(locked3.tier, "LOCKED_X402_PAYWALL_PREVIEW");
+  assert.equal(locked3.preview_data.status, "PAYMENT_REQUIRED_TO_UNLOCK");
+  assert.ok(locked3.instant_human_checkout_url.endsWith("/buy"));
+  assert.ok(locked3.attestation?.signature);
+  assert.equal(locked3.x402_unlock_full_data.starter_7d_pass_price_usdc, "1.00");
+  assert.equal(locked3.x402_unlock_full_data.prepaid_30d_pass_price_usdc, "5.00");
+
+  // Verify zero-config ?api_key=ak_live_... URL unlocks 4th call even after daily trial quota is exhausted
+  const unlockedViaQuery = await fetch(`${base}/mcp?api_key=${mintedKey}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "User-Agent": "codex-mcp-client/test" },
     body: JSON.stringify({
       jsonrpc: "2.0",
-      id: 2,
+      id: 204,
       method: "tools/call",
-      params: { name: "maps_leads", arguments: { query: "hotel", location: "Istanbul", limit: 5 } },
+      params: { name: "maps_leads", arguments: { query: "hotel", location: "Istanbul", limit: 2 } },
     }),
+  }).then((r) => r.json());
+  const unlockedJson = JSON.parse(unlockedViaQuery.result.content[0].text);
+  assert.ok(unlockedJson.count > 0);
+
+  // Verify /buy self-serve checkout page and /v1/claim-pass validation
+  const buyPageRes = await fetch(`${base}/buy`);
+  assert.equal(buyPageRes.status, 200);
+  const buyHtml = await buyPageRes.text();
+  assert.ok(buyHtml.includes("$1.00"));
+  assert.ok(buyHtml.includes("$49.00"));
+  assert.ok(buyHtml.includes("pay.coinbase.com"));
+
+  const badClaimRes = await fetch(`${base}/v1/claim-pass`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tx_hash: "invalid" }),
   });
-  assert.equal(mcpCallRes.status, 200);
-  const mcpCallJson = await mcpCallRes.json();
-  const teaserContent = JSON.parse(mcpCallJson.result.content[0].text);
-  assert.equal(teaserContent.tier, "LOCKED_X402_PAYWALL_PREVIEW");
-  assert.equal(teaserContent.preview_data.status, "PAYMENT_REQUIRED_TO_UNLOCK");
-  assert.ok(teaserContent.attestation?.signature);
-  assert.ok(teaserContent.x402_unlock_full_data.pay_to_wallet);
-  assert.equal(teaserContent.x402_unlock_full_data.prepaid_30d_pass_price_usdc, "5.00");
-  console.log("✅ 20. MCP Freemium Teaser Hook verified (HTTP 200 + preview + $5 Pass offer)");
+  assert.equal(badClaimRes.status, 400);
+
+  console.log("✅ 20. MCP 2-Call Free Trial -> 3rd Call Paywall + /buy ($1/$5/$49) + ?api_key= MCP URL verified");
 
   // 21. Test /v1/compliance-check ($0.05 AML & OFAC Sanctions Screening)
   const compRes = await fetch(`${base}/v1/compliance-check`, {

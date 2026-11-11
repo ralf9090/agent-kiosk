@@ -722,14 +722,23 @@ export function attestResponse(routePath, dataPayload) {
 }
 
 /**
- * Issue a stateless HMAC-SHA256 signed 30-day API key (ak_live_<payloadB64>.<sigB64>)
+ * Issue a stateless HMAC-SHA256 signed API key (ak_live_<payloadB64>.<sigB64>)
+ * Supports 7-day Starter Pass ($1 USDC) and 30-day Pro Pass ($5 USDC).
  */
-export function issuePrepaidPass({ payer = null, txHash = null, days = 30 } = {}) {
+export function issuePrepaidPass({
+  payer = null,
+  txHash = null,
+  days = 30,
+  tier = null,
+  baseUrl = "https://agent-kiosk.vercel.app",
+} = {}) {
+  const safeDays = Number(days) > 0 ? Number(days) : 30;
+  const resolvedTier = tier || (safeDays <= 7 ? "STARTER_7D_PASS" : "PRO_30D_PASS");
   const nowSec = Math.floor(Date.now() / 1000);
-  const expSec = nowSec + days * 86400;
+  const expSec = nowSec + safeDays * 86400;
   const payload = {
     v: 1,
-    tier: "PRO_30D_PASS",
+    tier: resolvedTier,
     iat: nowSec,
     exp: expSec,
     payer: payer || "x402-buyer",
@@ -741,15 +750,112 @@ export function issuePrepaidPass({ payer = null, txHash = null, days = 30 } = {}
     .createHmac("sha256", CONFIG.passSigningSecret)
     .update(payloadB64)
     .digest("base64url");
+  const apiKey = `ak_live_${payloadB64}.${sigB64}`;
   return {
-    api_key: `ak_live_${payloadB64}.${sigB64}`,
+    api_key: apiKey,
+    mcp_unlocked_url: `${baseUrl}/mcp?api_key=${apiKey}`,
     tier: payload.tier,
     issued_at: new Date(nowSec * 1000).toISOString(),
     expires_at: new Date(expSec * 1000).toISOString(),
-    valid_days: days,
+    valid_days: safeDays,
     payer: payload.payer,
     tx_hash: payload.tx,
   };
+}
+
+/**
+ * Verify a direct Base Mainnet ERC-20 USDC Transfer transaction hash on-chain.
+ * Enables zero-extension checkout from Coinbase, Binance, OKX, TrustWallet, or Coinbase Apple Pay Onramp.
+ */
+export async function verifyOnChainUsdcTransfer(txHash) {
+  const cleanHash = String(txHash || "").trim();
+  if (!/^0x[a-fA-F0-9]{64}$/.test(cleanHash)) {
+    return { valid: false, error: "Invalid Base transaction hash format (expected 0x + 64 hex chars)." };
+  }
+
+  const rpcs = ["https://base-rpc.publicnode.com", "https://mainnet.base.org"];
+  const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+  const expectedToTopic =
+    "0x" + CONFIG.payToWallet.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  const ownerLower = CONFIG.payToWallet.toLowerCase();
+  const usdcLower = CONFIG.usdcAsset.toLowerCase();
+
+  let lastErr = "Unable to reach Base Mainnet RPC.";
+  for (const rpcUrl of rpcs) {
+    try {
+      const rpcCall = async (method, params) => {
+        const r = await fetch(rpcUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+          signal: AbortSignal.timeout(6500),
+        });
+        const j = await r.json();
+        if (j.error) throw new Error(j.error.message || "RPC error");
+        return j.result;
+      };
+
+      const receipt = await rpcCall("eth_getTransactionReceipt", [cleanHash]);
+      if (!receipt) {
+        lastErr = "Transaction not found or still pending on Base Mainnet. Wait 3 seconds and retry.";
+        continue;
+      }
+      if (receipt.status !== "0x1") {
+        return { valid: false, error: "Transaction reverted on-chain (status != 0x1)." };
+      }
+
+      const block = await rpcCall("eth_getBlockByNumber", [receipt.blockNumber, false]);
+      const blockTsSec = block?.timestamp ? parseInt(block.timestamp, 16) : 0;
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (!blockTsSec || nowSec - blockTsSec > 48 * 3600) {
+        return {
+          valid: false,
+          error: "Transaction is older than 48 hours. Only recent Base USDC transfers can claim a new pass.",
+        };
+      }
+
+      let matchedAmount = 0n;
+      let payerAddress = null;
+      for (const log of receipt.logs || []) {
+        if (
+          String(log.address || "").toLowerCase() === usdcLower &&
+          Array.isArray(log.topics) &&
+          String(log.topics[0] || "").toLowerCase() === transferTopic &&
+          String(log.topics[2] || "").toLowerCase() === expectedToTopic
+        ) {
+          const fromAddr = "0x" + String(log.topics[1] || "").slice(-40).toLowerCase();
+          if (fromAddr === ownerLower) continue; // Reject self-siftah transfers
+          const amt = BigInt(log.data || "0x0");
+          matchedAmount += amt;
+          payerAddress = fromAddr;
+        }
+      }
+
+      if (matchedAmount < 1_000_000n) {
+        return {
+          valid: false,
+          error: `Insufficient Base USDC sent to ${CONFIG.payToWallet}. Minimum is $1.00 USDC (Starter 7-Day Pass) or $5.00 USDC (Pro 30-Day Pass).`,
+        };
+      }
+
+      const isPro30d = matchedAmount >= 5_000_000n;
+      const isSponsor = matchedAmount >= 49_000_000n;
+      return {
+        valid: true,
+        txHash: cleanHash.toLowerCase(),
+        payer: payerAddress,
+        amountAtomic: matchedAmount.toString(),
+        amountUsd: Number((Number(matchedAmount) / 1e6).toFixed(2)),
+        days: isPro30d ? 30 : 7,
+        tier: isSponsor ? "SPONSOR_30D_SLOT" : isPro30d ? "PRO_30D_PASS" : "STARTER_7D_PASS",
+        blockNumber: parseInt(receipt.blockNumber, 16),
+      };
+    } catch (err) {
+      lastErr = err.message;
+    }
+  }
+
+  return { valid: false, error: lastErr };
 }
 
 /**
@@ -892,12 +998,22 @@ export function build402Challenge(routePath, resourceUrl) {
  * Verify AND settle incoming x402 v2/v1 payment header across Base Mainnet facilitators
  */
 export async function verifyAndSettlePayment(req, routePath, resourceUrl, extraAuthArgs = {}) {
-  // 1. Check explicit API_SECRET_KEY or signed 30-day Prepaid Pass (ak_live_...)
+  // 1. Check explicit API_SECRET_KEY or signed Prepaid Pass (ak_live_...) via header, MCP arg, or ?api_key= query
+  let queryKey = "";
+  if (req?.url && req.url.includes("?")) {
+    try {
+      const q = new URL(req.url, "http://localhost").searchParams;
+      queryKey = q.get("api_key") || q.get("x_api_key") || "";
+    } catch {
+      queryKey = "";
+    }
+  }
   const providedKey = String(
-    req.headers["x-api-key"] ||
+    req?.headers?.["x-api-key"] ||
       extraAuthArgs?.x_api_key ||
       extraAuthArgs?.api_key ||
-      (req.headers["authorization"] || "").replace(/^Bearer\s+/i, "")
+      queryKey ||
+      (req?.headers?.["authorization"] || "").replace(/^Bearer\s+/i, "")
   ).trim();
 
   if (CONFIG.apiSecretKey && providedKey && providedKey === CONFIG.apiSecretKey) {
@@ -911,6 +1027,7 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl, extraA
         authorized: true,
         mode: "prepaid-pass",
         payer: passPayload.payer,
+        tier: passPayload.tier,
         settlementHeader: null,
       };
     }
@@ -964,6 +1081,8 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl, extraA
     const signedValNum = /^\d+$/.test(signedValStr) ? Number(signedValStr) : 0;
     const effectiveAmount = isOwnerSiftah
       ? "1000"
+      : routePath === "/v1/buy-pass" && signedValNum >= 1_000_000
+      ? signedValStr
       : routePath !== "/v1/buy-pass" && signedValNum >= 1000
       ? signedValStr
       : route.amount;
@@ -1109,6 +1228,7 @@ export async function verifyAndSettlePayment(req, routePath, resourceUrl, extraA
           mode: "x402",
           payer: rawPayload?.authorization?.from || verifyData?.payer || null,
           txHash: settleData.txHash || settleData.transaction || null,
+          paidAmountAtomic: effectiveAmount,
           settlementHeader,
         };
       } catch (innerErr) {

@@ -687,13 +687,32 @@ export async function tokenAlpha(params = {}) {
     signal = "SELL_PRESSURE";
   }
 
+  const swapSupportedChains = new Set(["base", "ethereum", "arbitrum", "polygon", "optimism"]);
+  const primaryChainLower = String(primary.chainId || "").toLowerCase();
+  const baseTokenAddr = primary.baseToken?.address || null;
+  const executableSwap =
+    baseTokenAddr && swapSupportedChains.has(primaryChainLower)
+      ? {
+          zero_paywall_calldata_url: `https://agent-kiosk.vercel.app/v1/free-swap?from_chain=${primaryChainLower}&from_token=USDC&to_token=${baseTokenAddr}&amount=100`,
+          mcp_tool: "defi_swap_quote",
+          mcp_arguments: {
+            from_chain: primaryChainLower,
+            from_token: "USDC",
+            to_token: baseTokenAddr,
+            amount: "100",
+          },
+          partner_fee_bps: 25,
+          note: "Free ($0.00) ready-to-sign EVM swap calldata via Relay/LI.FI/ParaSwap (includes 0.25% on-chain partner fee).",
+        }
+      : null;
+
   return {
     query: cleanQuery,
     found: true,
     token: {
       name: primary.baseToken?.name || cleanQuery,
       symbol: primary.baseToken?.symbol || cleanQuery,
-      address: primary.baseToken?.address || null,
+      address: baseTokenAddr,
       primary_chain: primary.chainId,
       price_usd: Number(primary.priceUsd || 0),
       market_cap_usd: primary.marketCap || primary.fdv || null,
@@ -732,7 +751,8 @@ export async function tokenAlpha(params = {}) {
       volume_24h_usd: p.volume?.h24 || 0,
       url: p.url,
     })),
-    llm_summary: `${primary.baseToken?.name} (${primary.baseToken?.symbol} on ${primary.chainId}): $${primary.priceUsd} | Signal: ${signal} | 1h Buy Pressure: ${buyPressure1hPct}% (${buys1h} buys vs ${sells1h} sells) | Liquidity: $${Math.round(totalLiquidityUsd).toLocaleString()} | 24h Vol: $${Math.round(totalVol24h).toLocaleString()}.`,
+    ...(executableSwap ? { executable_swap: executableSwap } : {}),
+    llm_summary: `${primary.baseToken?.name} (${primary.baseToken?.symbol} on ${primary.chainId}): $${primary.priceUsd} | Signal: ${signal} | 1h Buy Pressure: ${buyPressure1hPct}% (${buys1h} buys vs ${sells1h} sells) | Liquidity: $${Math.round(totalLiquidityUsd).toLocaleString()} | 24h Vol: $${Math.round(totalVol24h).toLocaleString()}.${executableSwap ? ` Instant $0.00 swap calldata available via defi_swap_quote or ${executableSwap.zero_paywall_calldata_url}` : ""}`,
   };
 }
 
@@ -1498,13 +1518,30 @@ export async function tokenDueDiligence(params = {}) {
     const resolvedChain = alphaData?.token?.primary_chain || (chain === "all" ? "base" : chain);
     const searchSymbol = alphaData?.token?.symbol || cleanQuery;
 
-    const [secRes, socRes] = await Promise.allSettled([
+    const canQuoteSwap =
+      ["base", "ethereum", "arbitrum", "polygon", "optimism"].includes(
+        String(resolvedChain).toLowerCase()
+      ) &&
+      /^0x[a-fA-F0-9]{40}$/.test(resolvedAddress) &&
+      resolvedAddress.toLowerCase() !== "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+
+    const [secRes, socRes, swapRes] = await Promise.allSettled([
       securityAudit({ target: resolvedAddress, chain: resolvedChain }),
       socialSearch({ query: `${searchSymbol} crypto`, limit: 5 }),
+      canQuoteSwap
+        ? defiSwapQuote({
+            from_chain: String(resolvedChain).toLowerCase(),
+            to_chain: String(resolvedChain).toLowerCase(),
+            from_token: "USDC",
+            to_token: resolvedAddress,
+            amount: "100",
+          })
+        : Promise.resolve(null),
     ]);
 
     const security = secRes.status === "fulfilled" ? secRes.value : null;
     const social = socRes.status === "fulfilled" ? socRes.value : { count: 0, items: [] };
+    const swapQuote = swapRes.status === "fulfilled" ? swapRes.value : null;
 
     const riskScore = security?.risk_score ?? 20;
     const liqUsd = alphaData?.alpha_metrics?.total_top5_liquidity_usd ?? 0;
@@ -1550,6 +1587,17 @@ export async function tokenDueDiligence(params = {}) {
         discussion_count: social.count || 0,
         top_threads: (social.items || []).slice(0, 5),
       },
+      ...(grade !== "F" && swapQuote?.transaction_request
+        ? {
+            instant_swap_calldata: {
+              sample_order: `100 USDC -> ${swapQuote.to_token?.estimated_amount_human} ${searchSymbol}`,
+              aggregator: swapQuote.aggregator,
+              partner_fee_bps: 25,
+              custom_amount_free_endpoint: `https://agent-kiosk.vercel.app/v1/free-swap?from_chain=${String(resolvedChain).toLowerCase()}&from_token=USDC&to_token=${resolvedAddress}&amount=100`,
+              transaction_request: swapQuote.transaction_request,
+            },
+          }
+        : {}),
       llm_markdown,
     };
   });
@@ -2466,6 +2514,13 @@ export async function perpFundingArbitrage(params = {}) {
       markets_scanned: allSymbols.size,
       count: top.length,
       items: top,
+      collateral_execution: {
+        zero_paywall_bridge_endpoint:
+          "https://agent-kiosk.vercel.app/v1/free-swap?from_chain=base&to_chain=arbitrum&from_token=USDC&to_token=USDC&amount=500",
+        mcp_tool: "defi_swap_quote",
+        partner_fee_bps: 25,
+        note: "Bridge Base/Ethereum USDC collateral to Arbitrum (Hyperliquid) instantly with $0.00 API paywall via /v1/free-swap.",
+      },
       llm_markdown,
     };
   });
