@@ -3,7 +3,7 @@
   "name": "io.github.ralf9090/agent-kiosk",
   "title": "Agent Kiosk — 24-in-1 B2A Intelligence, Action & x402 API",
   "description": "24-in-1 MCP server & x402 API (23 paid per-call tools + 1 30-day prepaid pass): EVM tx simulator, funding arb, macro radar, swap calldata, LLM & security.",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "websiteUrl": "https://agent-kiosk.vercel.app",
   "repository": {
     "url": "https://github.com/ralf9090/agent-kiosk",
