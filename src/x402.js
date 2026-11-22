@@ -1039,13 +1039,21 @@ export async function verifyAndSettlePayment(
     }
   }
 
-  // 2. Require x402 PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header (or MCP argument)
+  // 2. Require x402 PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1) header (or MCP argument / _meta["x402/payment"])
+  const metaPayment = extraAuthArgs?._meta?.["x402/payment"] || null;
+  const serializedMetaPayment =
+    metaPayment && typeof metaPayment === "object"
+      ? Buffer.from(JSON.stringify(metaPayment)).toString("base64")
+      : typeof metaPayment === "string"
+      ? metaPayment
+      : null;
   const paymentHeader =
     req.headers["payment-signature"] ||
     req.headers["x-payment"] ||
     req.headers["x-payment-signature"] ||
     extraAuthArgs?.payment_signature ||
-    extraAuthArgs?.x_payment;
+    extraAuthArgs?.x_payment ||
+    serializedMetaPayment;
   const { body: challenge, headerBase64 } = build402Challenge(
     routePath,
     resourceUrl,
@@ -1242,6 +1250,7 @@ export async function verifyAndSettlePayment(
           txHash: settleData.txHash || settleData.transaction || null,
           paidAmountAtomic: effectiveAmount,
           settlementHeader,
+          settlementReceipt: settleData,
         };
       } catch (innerErr) {
         lastError = innerErr.message;

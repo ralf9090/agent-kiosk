@@ -1222,7 +1222,43 @@ const TOOL_TO_ROUTE = {
   buy_prepaid_pass: "/v1/buy-pass",
 };
 
-export const ALL_MCP_TOOLS = [...MCP_TOOLS, ...PARTNER_MCP_TOOLS];
+function buildMcpToolX402Meta(amountAtomic) {
+  const entry = {
+    scheme: "exact",
+    network: CONFIG.network,
+    amount: String(amountAtomic),
+    maxAmountRequired: String(amountAtomic),
+    asset: CONFIG.usdcAsset,
+    payTo: CONFIG.payToWallet,
+    maxTimeoutSeconds: 60,
+    extra: { name: "USD Coin", version: "2" },
+  };
+  return {
+    x402: {
+      paymentRequired: true,
+      ...entry,
+      accepts: [entry],
+    },
+  };
+}
+
+export const ALL_MCP_TOOLS = [
+  ...MCP_TOOLS.map((t) => {
+    const r = TOOL_TO_ROUTE[t.name];
+    const p = PRICING[r];
+    if (!p || t.name === "defi_swap_quote") return t;
+    return {
+      ...t,
+      _meta: buildMcpToolX402Meta(p.amount),
+    };
+  }),
+  ...Object.values(FEATURED_PARTNER_TOOLS).map((p) => ({
+    name: p.mcp_tool,
+    description: `[Partner · ${p.provider}] ${p.description}`,
+    inputSchema: p.input_schema,
+    _meta: buildMcpToolX402Meta(p.amount_atomic),
+  })),
+];
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -2179,7 +2215,28 @@ export function createAppServer() {
       for (const tool of MCP_TOOLS) {
         const route = TOOL_TO_ROUTE[tool.name];
         const priceInfo = PRICING[route];
+        const queryParams = Object.entries(tool.inputSchema?.properties || {}).map(([pName, pSpec]) => ({
+          name: pName,
+          in: "query",
+          required: Array.isArray(tool.inputSchema?.required) && tool.inputSchema.required.includes(pName),
+          description: pSpec.description || pName,
+          schema: { type: pSpec.type || "string" },
+        }));
         openApiPaths[route] = {
+          get: {
+            operationId: `${tool.name}_get`,
+            summary: priceInfo.description,
+            tags: priceInfo.tags || ["agents", "x402", "attested"],
+            "x-payment-info": {
+              protocols: [{ x402: {} }],
+              price: { mode: "fixed", currency: "USD", amount: priceInfo.priceUsd },
+            },
+            parameters: queryParams,
+            responses: {
+              200: STANDARD_200_RESPONSE,
+              402: { description: `x402 v2 Payment Required ($${priceInfo.priceUsd} USDC on Base)` },
+            },
+          },
           post: {
             operationId: tool.name,
             summary: priceInfo.description,
@@ -2201,7 +2258,28 @@ export function createAppServer() {
       }
       for (const p of Object.values(FEATURED_PARTNER_TOOLS)) {
         const pRoute = `/p/${p.slug}`;
+        const pQueryParams = Object.entries(p.input_schema?.properties || {}).map(([pName, pSpec]) => ({
+          name: pName,
+          in: "query",
+          required: Array.isArray(p.input_schema?.required) && p.input_schema.required.includes(pName),
+          description: pSpec.description || pName,
+          schema: { type: pSpec.type || "string" },
+        }));
         openApiPaths[pRoute] = {
+          get: {
+            operationId: `${p.mcp_tool}_get`,
+            summary: `${p.name}: ${p.description}`,
+            tags: ["partner", "x402", "attested"],
+            "x-payment-info": {
+              protocols: [{ x402: {} }],
+              price: { mode: "fixed", currency: "USD", amount: p.price_usdc },
+            },
+            parameters: pQueryParams,
+            responses: {
+              200: STANDARD_200_RESPONSE,
+              402: { description: `x402 v2 Payment Required ($${p.price_usdc} USDC on Base)` },
+            },
+          },
           post: {
             operationId: p.mcp_tool,
             summary: `${p.name}: ${p.description}`,
@@ -3466,6 +3544,8 @@ export function createAppServer() {
         if (method === "tools/call") {
           const toolName = params?.name;
           const args = params?.arguments || {};
+          const callMeta = params?._meta && typeof params._meta === "object" ? params._meta : null;
+          const authArgs = callMeta ? { ...args, _meta: callMeta } : args;
           const partnerSlug = PARTNER_TOOL_TO_SLUG[toolName] || null;
           const partnerEntry = partnerSlug
             ? TELEMETRY.partner_tools?.[partnerSlug] || FEATURED_PARTNER_TOOLS[partnerSlug]
@@ -3500,13 +3580,14 @@ export function createAppServer() {
               req.headers["x-payment"] ||
               req.headers["x-payment-signature"] ||
               args.payment_signature ||
-              args.x_payment
+              args.x_payment ||
+              callMeta?.["x402/payment"]
           );
           const auth = await verifyAndSettlePayment(
             req,
             mappedRoute,
             `${baseUrl}${mappedRoute}`,
-            args,
+            authArgs,
             customSpec
           );
 
@@ -3716,6 +3797,9 @@ export function createAppServer() {
               jsonrpc: "2.0",
               id,
               result: {
+                ...(auth.settlementReceipt
+                  ? { _meta: { "x402/payment-response": auth.settlementReceipt } }
+                  : {}),
                 content: [
                   {
                     type: "text",

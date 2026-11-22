@@ -26,7 +26,9 @@ try {
   const openApi = await openApiRes.json();
   assert.ok(openApi.info.contact.email);
   assert.equal(Object.keys(openApi.paths).length, 26);
-  console.log("✅ 1. Discovery manifest, /openapi.json (26 paths), and /favicon.ico verified");
+  assert.ok(openApi.paths["/v1/token-alpha"].get);
+  assert.ok(openApi.paths["/v1/token-alpha"].post);
+  console.log("✅ 1. Discovery manifest, /openapi.json (26 GET+POST paths), and /favicon.ico verified");
 
   // 2. Test unauthenticated REST request returns HTTP 402 with x402Version 2, PAYMENT-REQUIRED header, and full Coinbase Bazaar schema
   const unpaidRes = await fetch(`${base}/v1/wallet-profiler`, {
@@ -303,7 +305,11 @@ try {
   assert.equal(mcpRes.status, 200);
   const mcpData = await mcpRes.json();
   assert.equal(mcpData.result.tools.length, 26);
-  console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 26 tools (incl. Grey Ridge partner tools)");
+  const samplePaidMcpTool = mcpData.result.tools.find((t) => t.name === "token_alpha");
+  assert.equal(samplePaidMcpTool._meta?.x402?.paymentRequired, true);
+  assert.equal(samplePaidMcpTool._meta?.x402?.network, "eip155:8453");
+  assert.ok(Array.isArray(samplePaidMcpTool._meta?.x402?.accepts));
+  console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 26 tools + _meta.x402 auto-pay metadata");
 
   // 20. Test MCP 2-Call Daily Free Trial -> 3rd Call Paywall + /buy Checkout + ?api_key= MCP Unlock
   const makeUnpaidMcpCall = () =>
