@@ -211,6 +211,37 @@ async function fetchBaseChainlinkBoard() {
   });
 }
 
+async function buildSwapGateFallback(tokenAddr, side = "buy", notionalUsd = 100) {
+  const audit = await withCache(`partner:gate-fb:${tokenAddr.toLowerCase()}`, 60_000, () =>
+    securityAudit({ target: tokenAddr, chain: "base" })
+  );
+  const info = audit?.token_info || {};
+  const liq = Number(info.liquidity_usd || 0);
+  const sizeNum = Number(notionalUsd || 100);
+  const impactPct = liq > 0 ? Number(((sizeNum / liq) * 100).toFixed(4)) : null;
+  const isSafe = audit?.verdict === "SAFE" && !info.is_honeypot;
+  const decision = !isSafe ? "block" : impactPct !== null && impactPct > 5 ? "hold" : "go";
+  return {
+    token: tokenAddr,
+    side,
+    notional_usd: sizeNum,
+    decision,
+    verdict: audit?.verdict || (isSafe ? "SAFE" : "HIGH_RISK"),
+    risk_score: audit?.risk_score ?? (isSafe ? 15 : 85),
+    liquidity_usd: liq || null,
+    impact_pct_of_pool: impactPct,
+    reason: isSafe
+      ? `token passes safety checks${impactPct !== null ? `; trade is ${impactPct}% of pool liquidity` : ""}`
+      : "contract risk or honeypot flags detected",
+    flags: Array.isArray(audit?.risk_flags) ? audit.risk_flags : [],
+    token_meta: {
+      symbol: info.symbol || null,
+      name: info.name || null,
+    },
+    analyzed_at: new Date().toISOString(),
+  };
+}
+
 export async function executePartnerTool(slug, params = {}, { previewOnly = false, reqMethod = "GET" } = {}) {
   const partner = TELEMETRY.partner_tools?.[slug] || FEATURED_PARTNER_TOOLS[slug];
   if (!partner) throw new Error(`Unknown partner tool: ${slug}`);
@@ -228,6 +259,9 @@ export async function executePartnerTool(slug, params = {}, { previewOnly = fals
   if (slug === "greyridge-swap-gate" && !target.searchParams.get("token")) {
     target.searchParams.set("token", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
   }
+  const tokenParam = target.searchParams.get("token") || "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const sideParam = target.searchParams.get("side") || "buy";
+  const notionalParam = Number(target.searchParams.get("notional_usd") || 100);
 
   const sigHeaders = signPartnerUpstreamHeaders(slug, methodToUse, target);
   const upRes = await fetch(target.toString(), {
@@ -243,40 +277,51 @@ export async function executePartnerTool(slug, params = {}, { previewOnly = fals
     signal: AbortSignal.timeout(8500),
   });
 
-  if (upRes.status === 402 && !previewOnly) {
+  if (!upRes.ok) {
     if (slug === "greyridge-chain-prices") {
       return await fetchBaseChainlinkBoard();
     }
-    if (partner.preview_url) {
-      const prevTarget = validateSafeExternalHttpsUrl(partner.preview_url);
-      for (const [k, v] of target.searchParams.entries()) prevTarget.searchParams.set(k, v);
-      const prevRes = await fetch(prevTarget.toString(), {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "AgentKiosk-PartnerRouter/2.6",
-          ...signPartnerUpstreamHeaders(slug, "GET", prevTarget),
-        },
-        signal: AbortSignal.timeout(7500),
-      });
-      const prevText = await prevRes.text();
-      try {
-        const parsedPrev = JSON.parse(prevText);
-        const { upgrade: _omitUpgrade, ...cleanPrev } = parsedPrev || {};
-        return {
-          ...cleanPrev,
-          partner_provider: partner.provider || partner.name,
-        };
-      } catch {
-        return { status: prevRes.status, raw_text: prevText.slice(0, 12000) };
+    if (slug === "greyridge-swap-gate") {
+      if (!previewOnly && partner.preview_url) {
+        try {
+          const prevTarget = validateSafeExternalHttpsUrl(partner.preview_url);
+          for (const [k, v] of target.searchParams.entries()) prevTarget.searchParams.set(k, v);
+          const prevRes = await fetch(prevTarget.toString(), {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+              "User-Agent": "AgentKiosk-PartnerRouter/2.6",
+              ...signPartnerUpstreamHeaders(slug, "GET", prevTarget),
+            },
+            signal: AbortSignal.timeout(6500),
+          });
+          if (prevRes.ok) {
+            const parsedPrev = await prevRes.json();
+            if (parsedPrev?.decision || parsedPrev?.verdict) {
+              const { upgrade: _omitUpgrade, ...cleanPrev } = parsedPrev;
+              return { ...cleanPrev, partner_provider: partner.provider || partner.name };
+            }
+          }
+        } catch {
+          // Fall through to on-chain GoPlus + DexScreener safety gate fallback
+        }
       }
+      return await buildSwapGateFallback(tokenParam, sideParam, notionalParam);
     }
   }
 
   const rawText = await upRes.text();
   try {
-    return JSON.parse(rawText);
+    const parsed = JSON.parse(rawText);
+    if (slug === "greyridge-swap-gate" && !parsed?.decision && !parsed?.verdict) {
+      return await buildSwapGateFallback(tokenParam, sideParam, notionalParam);
+    }
+    const { upgrade: _omitUpgrade, ...clean } = parsed || {};
+    return clean;
   } catch {
+    if (slug === "greyridge-swap-gate") {
+      return await buildSwapGateFallback(tokenParam, sideParam, notionalParam);
+    }
     return { status: upRes.status, raw_text: rawText.slice(0, 12000) };
   }
 }
