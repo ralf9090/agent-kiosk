@@ -4,7 +4,10 @@
  */
 import readline from "node:readline";
 import {
-  MCP_TOOLS,
+  ALL_MCP_TOOLS,
+  FEATURED_PARTNER_TOOLS,
+  PARTNER_TOOL_TO_SLUG,
+  executePartnerTool,
   MCP_PROMPTS,
   MCP_RESOURCES,
   MCP_RESOURCE_TEMPLATES,
@@ -60,6 +63,10 @@ const HANDLERS = {
   token_due_diligence: tokenDueDiligence,
   b2b_company_dossier: b2bCompanyDossier,
   whale_alpha_radar: whaleAlphaRadar,
+  greyridge_swap_gate: (params = {}) =>
+    executePartnerTool("greyridge-swap-gate", params, { previewOnly: false, reqMethod: "GET" }),
+  greyridge_chain_prices: (params = {}) =>
+    executePartnerTool("greyridge-chain-prices", params, { previewOnly: false, reqMethod: "GET" }),
   buy_prepaid_pass: async () => ({
     status: "PAYMENT_REQUIRED_FOR_LIVE_KEY",
     tier: "PRO_30D_PASS",
@@ -105,6 +112,8 @@ const TOOL_TO_ROUTE = {
   token_due_diligence: "/v1/token-due-diligence",
   b2b_company_dossier: "/v1/b2b-company-dossier",
   whale_alpha_radar: "/v1/whale-alpha-radar",
+  greyridge_swap_gate: "/p/greyridge-swap-gate",
+  greyridge_chain_prices: "/p/greyridge-chain-prices",
   buy_prepaid_pass: "/v1/buy-pass",
 };
 
@@ -162,7 +171,7 @@ rl.on("line", async (line) => {
       return sendRpc({
         jsonrpc: "2.0",
         id,
-        result: { tools: MCP_TOOLS },
+        result: { tools: ALL_MCP_TOOLS },
       });
     }
 
@@ -237,7 +246,19 @@ rl.on("line", async (line) => {
       }
 
       const endpointUrl = `${BASE_URL}${mappedRoute}`;
-      const priceUsd = PRICING[mappedRoute]?.priceUsd || "0.02";
+      const pSlug = PARTNER_TOOL_TO_SLUG[toolName] || null;
+      const pEntry = pSlug ? FEATURED_PARTNER_TOOLS[pSlug] : null;
+      const customSpec = pEntry
+        ? {
+            priceUsd: pEntry.price_usdc,
+            amount: pEntry.amount_atomic,
+            description: `${pEntry.name}: ${pEntry.description}`,
+            mimeType: "application/json",
+            tags: ["partner", "x402", "b2a", "attested"],
+            inputSchema: pEntry.input_schema || undefined,
+          }
+        : null;
+      const priceUsd = pEntry?.price_usdc || PRICING[mappedRoute]?.priceUsd || "0.02";
 
       const envApiKey = process.env.AGENT_KIOSK_API_KEY || process.env.X_API_KEY || "";
       if (
@@ -248,7 +269,7 @@ rl.on("line", async (line) => {
         envApiKey
       ) {
         const fakeReq = { headers: envApiKey ? { "x-api-key": envApiKey } : {} };
-        const auth = await verifyAndSettlePayment(fakeReq, mappedRoute, endpointUrl, args);
+        const auth = await verifyAndSettlePayment(fakeReq, mappedRoute, endpointUrl, args, customSpec);
         if (auth.authorized) {
           const fullData = await fn(args);
           return sendRpc({
@@ -310,7 +331,7 @@ rl.on("line", async (line) => {
       const teaserArgs = { ...args, limit: 1, max_length: 160 };
       const rawPreview = await fn(teaserArgs);
       const lockNote = `[LOCKED — Free trial quota used. Unlock in 10s at ${BASE_URL}/buy ($1 Starter 7-Day Pass or $5 Pro 30-Day Pass) OR pay $${priceUsd} USDC via x402]`;
-      const { body: challenge } = build402Challenge(mappedRoute, endpointUrl);
+      const { body: challenge } = build402Challenge(mappedRoute, endpointUrl, customSpec);
       const firstHeading = rawPreview?.llm_markdown
         ? rawPreview.llm_markdown.split("\n")[0].slice(0, 120)
         : `${toolName} live dataset ready`;

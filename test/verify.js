@@ -25,8 +25,8 @@ try {
   assert.equal(openApiRes.status, 200);
   const openApi = await openApiRes.json();
   assert.ok(openApi.info.contact.email);
-  assert.equal(Object.keys(openApi.paths).length, 24);
-  console.log("✅ 1. Discovery manifest, /openapi.json (24 paths), and /favicon.ico verified");
+  assert.equal(Object.keys(openApi.paths).length, 26);
+  console.log("✅ 1. Discovery manifest, /openapi.json (26 paths), and /favicon.ico verified");
 
   // 2. Test unauthenticated REST request returns HTTP 402 with x402Version 2, PAYMENT-REQUIRED header, and full Coinbase Bazaar schema
   const unpaidRes = await fetch(`${base}/v1/wallet-profiler`, {
@@ -294,7 +294,7 @@ try {
     `✅ 18. /v1/buy-pass ($5.00 Prepaid Pass) & Smart Cache verified (Cache response in ${elapsedMs}ms)`
   );
 
-  // 19. Test MCP JSON-RPC tools/list returns all 24 tools
+  // 19. Test MCP JSON-RPC tools/list returns all 26 tools (24 first-party + 2 Grey Ridge partner tools)
   const mcpRes = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -302,8 +302,8 @@ try {
   });
   assert.equal(mcpRes.status, 200);
   const mcpData = await mcpRes.json();
-  assert.equal(mcpData.result.tools.length, 24);
-  console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 24 tools");
+  assert.equal(mcpData.result.tools.length, 26);
+  console.log("✅ 19. MCP JSON-RPC endpoint (/mcp) verified with all 26 tools (incl. Grey Ridge partner tools)");
 
   // 20. Test MCP 2-Call Daily Free Trial -> 3rd Call Paywall + /buy Checkout + ?api_key= MCP Unlock
   const makeUnpaidMcpCall = () =>
@@ -343,7 +343,7 @@ try {
       jsonrpc: "2.0",
       id: 204,
       method: "tools/call",
-      params: { name: "maps_leads", arguments: { query: "hotel", location: "Istanbul", limit: 2 } },
+      params: { name: "maps_leads", arguments: { query: "hotel", location: "Istanbul", limit: 3 } },
     }),
   }).then((r) => r.json());
   const unlockedJson = JSON.parse(unlockedViaQuery.result.content[0].text);
@@ -486,6 +486,56 @@ try {
   assert.ok(paidPartnerJson.attestation?.signature);
   console.log(
     `✅ 25. /audit (Score: ${liveAudit.score_100}/100, SSRF guard) & /sell (/p/demo-hn-top 402 + attested proxy) verified`
+  );
+
+  // 26. Test Featured 70/30 Partner Integration: Grey Ridge Signals (/p/greyridge-swap-gate, /p/greyridge-chain-prices & MCP)
+  const partnersRes = await fetch(`${base}/v1/partners`);
+  assert.equal(partnersRes.status, 200);
+  const partnersJson = await partnersRes.json();
+  assert.equal(partnersJson.partner_request_verification.algorithm, "Ed25519");
+  const grSwapEntry = partnersJson.partners.find((p) => p.slug === "greyridge-swap-gate");
+  assert.ok(grSwapEntry);
+  assert.equal(grSwapEntry.revenue_split, "70% seller / 30% Agent Kiosk");
+  assert.equal(grSwapEntry.seller_wallet, "0x5765ae06a52dc7A0BB71c36A11db512c7ea9ed10");
+
+  const unpaidGrSwap = await fetch(`${base}/p/greyridge-swap-gate?token=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`);
+  assert.equal(unpaidGrSwap.status, 402);
+
+  const paidGrSwap = await fetch(
+    `${base}/p/greyridge-swap-gate?token=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&side=buy&notional_usd=250`,
+    { headers: { "X-API-KEY": mintedKey } }
+  );
+  assert.equal(paidGrSwap.status, 200);
+  const paidGrSwapJson = await paidGrSwap.json();
+  assert.equal(paidGrSwapJson.ok, true);
+  assert.ok(paidGrSwapJson.data.verdict || paidGrSwapJson.data.decision);
+  assert.ok(paidGrSwapJson.attestation?.signature);
+
+  const paidGrPrices = await fetch(`${base}/p/greyridge-chain-prices`, {
+    headers: { "X-API-KEY": mintedKey },
+  });
+  assert.equal(paidGrPrices.status, 200);
+  const paidGrPricesJson = await paidGrPrices.json();
+  assert.ok(paidGrPricesJson.data.prices?.BTC > 0);
+  assert.ok(paidGrPricesJson.data.prices?.ETH > 0);
+
+  const mcpGrSwap = await fetch(`${base}/mcp?api_key=${mintedKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 260,
+      method: "tools/call",
+      params: {
+        name: "greyridge_swap_gate",
+        arguments: { token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", side: "buy", notional_usd: 100 },
+      },
+    }),
+  }).then((r) => r.json());
+  const mcpGrSwapParsed = JSON.parse(mcpGrSwap.result.content[0].text);
+  assert.ok(mcpGrSwapParsed.decision || mcpGrSwapParsed.verdict);
+  console.log(
+    `✅ 26. Grey Ridge 70/30 Partner Tools verified (Swap Verdict: ${paidGrSwapJson.data.verdict}, BTC: $${paidGrPricesJson.data.prices.BTC})`
   );
 } finally {
   server.close();

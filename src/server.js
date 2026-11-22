@@ -1,4 +1,5 @@
 import http from "node:http";
+import crypto from "node:crypto";
 import {
   socialSearch,
   mapsLeads,
@@ -37,6 +38,249 @@ const PORT = Number(process.env.PORT || 4020);
 const TELEMETRY_GIST_ID = process.env.TELEMETRY_GIST_ID || "";
 const TELEMETRY_GH_TOKEN = process.env.TELEMETRY_GH_TOKEN || "";
 
+export const KIOSK_PARTNER_ED25519_PUB_HEX =
+  "dc4f2a0120ef0b7de79e34ad8e4c2a3becc3ad3a588f954d2bcd9744ddd28a43";
+
+let cachedPartnerSigningKey = null;
+function getPartnerSigningKey() {
+  if (cachedPartnerSigningKey) return cachedPartnerSigningKey;
+  const privB64 = (process.env.KIOSK_PARTNER_ED25519_PRIV_B64 || "").trim();
+  if (privB64) {
+    const keyObj = crypto.createPrivateKey({
+      key: Buffer.from(privB64, "base64"),
+      format: "der",
+      type: "pkcs8",
+    });
+    const spki = crypto.createPublicKey(keyObj).export({ type: "spki", format: "der" });
+    const pubHex = spki.subarray(spki.length - 32).toString("hex");
+    cachedPartnerSigningKey = { privateKey: keyObj, pubHex };
+    return cachedPartnerSigningKey;
+  }
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const spki = publicKey.export({ type: "spki", format: "der" });
+  cachedPartnerSigningKey = {
+    privateKey,
+    pubHex: spki.subarray(spki.length - 32).toString("hex"),
+  };
+  return cachedPartnerSigningKey;
+}
+
+export function signPartnerUpstreamHeaders(slug, method, targetUrl) {
+  const { privateKey, pubHex } = getPartnerSigningKey();
+  const ts = String(Math.floor(Date.now() / 1000));
+  const payload = `${ts}.${method.toUpperCase()}.${targetUrl.pathname}${targetUrl.search}`;
+  const sig = crypto.sign(null, Buffer.from(payload, "utf8"), privateKey).toString("base64url");
+  const headers = {
+    "X-Kiosk-Partner-Slug": slug,
+    "X-Kiosk-Timestamp": ts,
+    "X-Kiosk-Signature": sig,
+    "X-Kiosk-Pubkey": pubHex,
+  };
+  const sharedKey = (process.env.GREYRIDGE_PARTNER_KEY || "").trim();
+  if (sharedKey && slug.startsWith("greyridge-")) {
+    headers["X-Partner-Key"] = sharedKey;
+  }
+  return headers;
+}
+
+export const FEATURED_PARTNER_TOOLS = {
+  "greyridge-swap-gate": {
+    slug: "greyridge-swap-gate",
+    mcp_tool: "greyridge_swap_gate",
+    name: "Grey Ridge Signals — Pre-Swap Token Safety Gate",
+    provider: "Grey Ridge Signals",
+    description:
+      "Pre-trade Base token safety gate (GO / HOLD / BLOCK) combining live honeypot/sellability simulation, admin-control flags, and Uniswap v3 WETH pool price-impact sizing.",
+    upstream_url: "https://api.greyridgesignals.ai/gate/swap",
+    preview_url: "https://api.greyridgesignals.ai/gate/swap/preview",
+    upstream_method: "GET",
+    price_usdc: "0.008",
+    amount_atomic: "8000",
+    seller_wallet: "0x5765ae06a52dc7A0BB71c36A11db512c7ea9ed10",
+    seller_share_pct: 70,
+    kiosk_fee_pct: 30,
+    created_at_utc: "2026-11-22T21:25:00.000Z",
+    calls_paid: 0,
+    gross_usdc: 0,
+    seller_earned_usdc: 0,
+    kiosk_fee_usdc: 0,
+    input_schema: {
+      type: "object",
+      properties: {
+        token: {
+          type: "string",
+          description:
+            "0x-prefixed Base Mainnet ERC-20 token contract address (e.g., '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')",
+        },
+        side: {
+          type: "string",
+          enum: ["buy", "sell"],
+          description: "Trade direction (default: 'buy')",
+        },
+        notional_usd: {
+          type: "number",
+          description: "Intended trade size in USD for pool liquidity impact check (default: 100)",
+        },
+      },
+      required: ["token"],
+    },
+  },
+  "greyridge-chain-prices": {
+    slug: "greyridge-chain-prices",
+    mcp_tool: "greyridge_chain_prices",
+    name: "Grey Ridge Signals — Chainlink Multi-Asset Spot Prices",
+    provider: "Grey Ridge Signals",
+    description:
+      "Trusted on-chain BTC, ETH, LINK, and SOL USD spot price snapshot from Base Chainlink aggregators with per-feed staleness checks in one call.",
+    upstream_url: "https://api.greyridgesignals.ai/chain/prices",
+    preview_url: "https://api.greyridgesignals.ai/crypto/prices/preview",
+    upstream_method: "GET",
+    price_usdc: "0.005",
+    amount_atomic: "5000",
+    seller_wallet: "0x5765ae06a52dc7A0BB71c36A11db512c7ea9ed10",
+    seller_share_pct: 70,
+    kiosk_fee_pct: 30,
+    created_at_utc: "2026-11-22T21:25:00.000Z",
+    calls_paid: 0,
+    gross_usdc: 0,
+    seller_earned_usdc: 0,
+    kiosk_fee_usdc: 0,
+    input_schema: {
+      type: "object",
+      properties: {
+        chain: {
+          type: "string",
+          enum: ["base"],
+          description: "Target chain for Chainlink aggregator feeds (default: 'base')",
+        },
+      },
+    },
+  },
+};
+
+export const PARTNER_MCP_TOOLS = Object.values(FEATURED_PARTNER_TOOLS).map((p) => ({
+  name: p.mcp_tool,
+  description: `[Partner · ${p.provider}] ${p.description}`,
+  inputSchema: p.input_schema,
+}));
+
+export const PARTNER_TOOL_TO_SLUG = Object.fromEntries(
+  Object.values(FEATURED_PARTNER_TOOLS).map((p) => [p.mcp_tool, p.slug])
+);
+
+const BASE_CHAINLINK_FEEDS = {
+  BTC: "0x64c911996D3c6aC71f9b455B1E8E7266BcbD848F",
+  ETH: "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+  LINK: "0x17CAb8FE31E32f08326e5E27412894e49B0f9D65",
+  SOL: "0x975043adBb80fc32276CbF9Bbcfd4A601a12462D",
+};
+
+async function fetchBaseChainlinkBoard() {
+  return withCache("partner:base-chainlink-board", 20_000, async () => {
+    const prices = {};
+    const staleness_seconds = {};
+    const nowSec = Math.floor(Date.now() / 1000);
+    await Promise.all(
+      Object.entries(BASE_CHAINLINK_FEEDS).map(async ([sym, feed]) => {
+        const res = await fetch("https://mainnet.base.org", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "eth_call",
+            params: [{ to: feed, data: "0xfeaf968c" }, "latest"],
+          }),
+          signal: AbortSignal.timeout(5000),
+        }).then((r) => r.json());
+        const hex = res?.result || "";
+        if (hex.length >= 2 + 64 * 5) {
+          const answer = Number(BigInt("0x" + hex.slice(2 + 64, 2 + 128))) / 1e8;
+          const updatedAt = Number(BigInt("0x" + hex.slice(2 + 64 * 3, 2 + 64 * 4)));
+          prices[sym] = Number(answer.toFixed(4));
+          staleness_seconds[sym] = Math.max(0, nowSec - updatedAt);
+        }
+      })
+    );
+    return {
+      prices,
+      staleness_seconds,
+      chain: "base",
+      oracle: "chainlink-base-aggregators",
+    };
+  });
+}
+
+export async function executePartnerTool(slug, params = {}, { previewOnly = false, reqMethod = "GET" } = {}) {
+  const partner = TELEMETRY.partner_tools?.[slug] || FEATURED_PARTNER_TOOLS[slug];
+  if (!partner) throw new Error(`Unknown partner tool: ${slug}`);
+
+  const excludedKeys = new Set(["api_key", "x_api_key", "payment_signature", "x_payment", "_force_locked_preview"]);
+  const methodToUse = partner.upstream_method || (reqMethod === "POST" ? "POST" : "GET");
+  const baseTargetUrl = previewOnly && partner.preview_url ? partner.preview_url : partner.upstream_url;
+  const target = validateSafeExternalHttpsUrl(baseTargetUrl);
+
+  for (const [k, v] of Object.entries(params || {})) {
+    if (!excludedKeys.has(k) && v !== undefined && v !== null && v !== "") {
+      target.searchParams.set(k, String(v));
+    }
+  }
+  if (slug === "greyridge-swap-gate" && !target.searchParams.get("token")) {
+    target.searchParams.set("token", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
+  }
+
+  const sigHeaders = signPartnerUpstreamHeaders(slug, methodToUse, target);
+  const upRes = await fetch(target.toString(), {
+    method: methodToUse,
+    redirect: "manual",
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      ...(methodToUse === "POST" ? { "Content-Type": "application/json" } : {}),
+      "User-Agent": "AgentKiosk-PartnerRouter/2.6",
+      ...sigHeaders,
+    },
+    ...(methodToUse === "POST" ? { body: JSON.stringify(params || {}) } : {}),
+    signal: AbortSignal.timeout(8500),
+  });
+
+  if (upRes.status === 402 && !previewOnly) {
+    if (slug === "greyridge-chain-prices") {
+      return await fetchBaseChainlinkBoard();
+    }
+    if (partner.preview_url) {
+      const prevTarget = validateSafeExternalHttpsUrl(partner.preview_url);
+      for (const [k, v] of target.searchParams.entries()) prevTarget.searchParams.set(k, v);
+      const prevRes = await fetch(prevTarget.toString(), {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "AgentKiosk-PartnerRouter/2.6",
+          ...signPartnerUpstreamHeaders(slug, "GET", prevTarget),
+        },
+        signal: AbortSignal.timeout(7500),
+      });
+      const prevText = await prevRes.text();
+      try {
+        const parsedPrev = JSON.parse(prevText);
+        const { upgrade: _omitUpgrade, ...cleanPrev } = parsedPrev || {};
+        return {
+          ...cleanPrev,
+          partner_provider: partner.provider || partner.name,
+        };
+      } catch {
+        return { status: prevRes.status, raw_text: prevText.slice(0, 12000) };
+      }
+    }
+  }
+
+  const rawText = await upRes.text();
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    return { status: upRes.status, raw_text: rawText.slice(0, 12000) };
+  }
+}
+
 export const TELEMETRY = {
   started_at_utc: new Date().toISOString(),
   updated_at_utc: new Date().toISOString(),
@@ -49,7 +293,7 @@ export const TELEMETRY = {
   paid_calls_succeeded: 0,
   external_paid_calls: 1, // Verified external EIP-3009 sale at Base Block 52737689 (TX: 0x703e3a59... from 0xc6699d2a...)
   claimed_tx_hashes: [],
-  partner_tools: {},
+  partner_tools: structuredClone(FEATURED_PARTNER_TOOLS),
   by_route: {},
   recent_events: [],
 };
@@ -170,12 +414,14 @@ export async function ensureTelemetryLoaded(force = false) {
     if (cloud.partner_tools && typeof cloud.partner_tools === "object") {
       for (const [slug, tool] of Object.entries(cloud.partner_tools)) {
         const cur = TELEMETRY.partner_tools[slug];
+        const canonical = FEATURED_PARTNER_TOOLS[slug] || {};
         if (!cur) {
-          TELEMETRY.partner_tools[slug] = tool;
+          TELEMETRY.partner_tools[slug] = { ...tool, ...canonical };
         } else {
           TELEMETRY.partner_tools[slug] = {
             ...tool,
             ...cur,
+            ...canonical,
             calls_paid: Math.max(cur.calls_paid || 0, tool.calls_paid || 0),
             gross_usdc: Math.max(cur.gross_usdc || 0, tool.gross_usdc || 0),
             seller_earned_usdc: Math.max(cur.seller_earned_usdc || 0, tool.seller_earned_usdc || 0),
@@ -975,6 +1221,8 @@ const TOOL_TO_ROUTE = {
   llm_chat_completions: "/v1/chat/completions",
   buy_prepaid_pass: "/v1/buy-pass",
 };
+
+export const ALL_MCP_TOOLS = [...MCP_TOOLS, ...PARTNER_MCP_TOOLS];
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -1902,7 +2150,7 @@ export function createAppServer() {
           streamableHttp: `${baseUrl}/mcp`,
           smithery: "https://agent-kiosk--batuhansenavci.run.tools",
         },
-        tools: MCP_TOOLS,
+        tools: ALL_MCP_TOOLS,
         prompts: MCP_PROMPTS,
         resources: MCP_RESOURCES,
       });
@@ -1947,6 +2195,28 @@ export function createAppServer() {
             responses: {
               200: STANDARD_200_RESPONSE,
               402: { description: `x402 v2 Payment Required ($${priceInfo.priceUsd} USDC on Base)` },
+            },
+          },
+        };
+      }
+      for (const p of Object.values(FEATURED_PARTNER_TOOLS)) {
+        const pRoute = `/p/${p.slug}`;
+        openApiPaths[pRoute] = {
+          post: {
+            operationId: p.mcp_tool,
+            summary: `${p.name}: ${p.description}`,
+            tags: ["partner", "x402", "attested"],
+            "x-payment-info": {
+              protocols: [{ x402: {} }],
+              price: { mode: "fixed", currency: "USD", amount: p.price_usdc },
+            },
+            requestBody: {
+              required: false,
+              content: { "application/json": { schema: p.input_schema } },
+            },
+            responses: {
+              200: STANDARD_200_RESPONSE,
+              402: { description: `x402 v2 Payment Required ($${p.price_usdc} USDC on Base)` },
             },
           },
         };
@@ -2791,18 +3061,37 @@ export function createAppServer() {
 
     if (req.method === "GET" && pathname === "/v1/partners") {
       await ensureTelemetryLoaded(false);
-      const list = Object.values(TELEMETRY.partner_tools || {}).map((p) => ({
-        slug: p.slug,
-        name: p.name,
-        description: p.description,
-        kiosk_x402_endpoint: `${baseUrl}/p/${p.slug}`,
-        price_usdc: p.price_usdc,
-        seller_wallet: p.seller_wallet,
-        revenue_split: "85% seller / 15% Agent Kiosk",
-        calls_paid: p.calls_paid || 0,
-        gross_usdc: p.gross_usdc || 0,
-      }));
-      return sendJson(res, 200, { ok: true, count: list.length, partners: list });
+      const list = Object.values(TELEMETRY.partner_tools || {}).map((p) => {
+        const sellerPct = p.seller_share_pct ?? 85;
+        const kioskPct = p.kiosk_fee_pct ?? 15;
+        return {
+          slug: p.slug,
+          mcp_tool: p.mcp_tool || null,
+          name: p.name,
+          provider: p.provider || null,
+          description: p.description,
+          kiosk_x402_endpoint: `${baseUrl}/p/${p.slug}`,
+          upstream_url: p.upstream_url,
+          price_usdc: p.price_usdc,
+          seller_wallet: p.seller_wallet,
+          revenue_split: `${sellerPct}% seller / ${kioskPct}% Agent Kiosk`,
+          calls_paid: p.calls_paid || 0,
+          gross_usdc: p.gross_usdc || 0,
+          seller_earned_usdc: p.seller_earned_usdc || 0,
+          kiosk_fee_usdc: p.kiosk_fee_usdc || 0,
+        };
+      });
+      return sendJson(res, 200, {
+        ok: true,
+        count: list.length,
+        partner_request_verification: {
+          algorithm: "Ed25519",
+          public_key_raw_hex: getPartnerSigningKey().pubHex,
+          headers: ["X-Kiosk-Partner-Slug", "X-Kiosk-Timestamp", "X-Kiosk-Signature", "X-Kiosk-Pubkey"],
+          signed_payload_format: "<X-Kiosk-Timestamp>.<METHOD>.<PATH_AND_QUERY>",
+        },
+        partners: list,
+      });
     }
 
     if (req.method === "POST" && pathname === "/v1/partner-register") {
@@ -2904,6 +3193,7 @@ export function createAppServer() {
         description: `${partner.name}: ${partner.description}`,
         mimeType: "application/json",
         tags: ["partner", "x402", "b2a", "attested"],
+        inputSchema: partner.input_schema || undefined,
       };
       const resourceUrl = `${baseUrl}/p/${slug}`;
       const auth = await verifyAndSettlePayment(req, `/p/${slug}`, resourceUrl, {}, customSpec);
@@ -2914,44 +3204,36 @@ export function createAppServer() {
         });
       }
       try {
-        const upstreamTarget = validateSafeExternalHttpsUrl(partner.upstream_url);
-        for (const [k, v] of urlObj.searchParams.entries()) {
-          if (k !== "api_key" && k !== "x_api_key") upstreamTarget.searchParams.set(k, v);
-        }
-        const jsonBody = req.method === "POST" ? await readJsonBody(req) : null;
-        const upRes = await fetch(upstreamTarget.toString(), {
-          method: req.method,
-          redirect: "manual",
-          headers: {
-            Accept: "application/json, text/plain, */*",
-            ...(req.method === "POST" ? { "Content-Type": "application/json" } : {}),
-            "User-Agent": "AgentKiosk-PartnerRouter/2.6",
-            "X-Kiosk-Partner-Slug": slug,
-          },
-          ...(req.method === "POST" ? { body: JSON.stringify(jsonBody || {}) } : {}),
-          signal: AbortSignal.timeout(8500),
+        const queryParams = Object.fromEntries(urlObj.searchParams.entries());
+        const jsonBody = req.method === "POST" ? await readJsonBody(req) : {};
+        const mergedParams = { ...queryParams, ...(jsonBody || {}) };
+        const parsedData = await executePartnerTool(slug, mergedParams, {
+          previewOnly: false,
+          reqMethod: req.method,
         });
-        const rawText = await upRes.text();
-        let parsedData;
-        try {
-          parsedData = JSON.parse(rawText);
-        } catch {
-          parsedData = { status: upRes.status, raw_text: rawText.slice(0, 12000) };
-        }
+        const sellerRatio = (partner.seller_share_pct ?? 85) / 100;
+        const kioskRatio = (partner.kiosk_fee_pct ?? 15) / 100;
         if (auth.mode === "x402") {
           const gross = Number(partner.price_usdc);
           partner.calls_paid = (partner.calls_paid || 0) + 1;
           partner.gross_usdc = Number(((partner.gross_usdc || 0) + gross).toFixed(6));
           partner.seller_earned_usdc = Number(
-            ((partner.seller_earned_usdc || 0) + gross * 0.85).toFixed(6)
+            ((partner.seller_earned_usdc || 0) + gross * sellerRatio).toFixed(6)
           );
           partner.kiosk_fee_usdc = Number(
-            ((partner.kiosk_fee_usdc || 0) + gross * 0.15).toFixed(6)
+            ((partner.kiosk_fee_usdc || 0) + gross * kioskRatio).toFixed(6)
           );
         } else {
           partner.calls_paid = (partner.calls_paid || 0) + 1;
         }
-        await recordTelemetry("external_paid_call", `/p/${slug}`, req, `partner:${auth.mode}`);
+        const isOwnerBoost =
+          auth.payer && auth.payer.toLowerCase() === CONFIG.payToWallet.toLowerCase();
+        await recordTelemetry(
+          isOwnerBoost ? "paid_call" : "external_paid_call",
+          `/p/${slug}`,
+          req,
+          `partner:${auth.mode}`
+        );
         await flushTelemetryToCloud(true);
         const attestation = attestResponse(`/p/${slug}`, parsedData);
         const extraHeaders = auth.settlementHeader
@@ -3074,8 +3356,8 @@ export function createAppServer() {
         protocolVersion: "2024-11-05",
         attested: true,
         endpoint: `${baseUrl}/mcp`,
-        toolsCount: MCP_TOOLS.length,
-        tools: MCP_TOOLS.map((t) => t.name),
+        toolsCount: ALL_MCP_TOOLS.length,
+        tools: ALL_MCP_TOOLS.map((t) => t.name),
       });
     }
 
@@ -3117,11 +3399,11 @@ export function createAppServer() {
         }
 
         if (method === "tools/list") {
-          await recordTelemetry("mcp_tools_list", "/mcp", req, `${MCP_TOOLS.length} tools indexed`);
+          await recordTelemetry("mcp_tools_list", "/mcp", req, `${ALL_MCP_TOOLS.length} tools indexed`);
           return sendJson(res, 200, {
             jsonrpc: "2.0",
             id,
-            result: { tools: MCP_TOOLS },
+            result: { tools: ALL_MCP_TOOLS },
           });
         }
 
@@ -3184,7 +3466,11 @@ export function createAppServer() {
         if (method === "tools/call") {
           const toolName = params?.name;
           const args = params?.arguments || {};
-          const mappedRoute = TOOL_TO_ROUTE[toolName];
+          const partnerSlug = PARTNER_TOOL_TO_SLUG[toolName] || null;
+          const partnerEntry = partnerSlug
+            ? TELEMETRY.partner_tools?.[partnerSlug] || FEATURED_PARTNER_TOOLS[partnerSlug]
+            : null;
+          const mappedRoute = partnerSlug ? `/p/${partnerSlug}` : TOOL_TO_ROUTE[toolName];
 
           if (!mappedRoute) {
             return sendJson(res, 200, {
@@ -3193,6 +3479,21 @@ export function createAppServer() {
               error: { code: -32601, message: `Unknown tool: ${toolName}` },
             });
           }
+
+          const customSpec = partnerEntry
+            ? {
+                priceUsd: partnerEntry.price_usdc,
+                amount: partnerEntry.amount_atomic,
+                description: `${partnerEntry.name}: ${partnerEntry.description}`,
+                mimeType: "application/json",
+                tags: ["partner", "x402", "b2a", "attested"],
+                inputSchema: partnerEntry.input_schema || undefined,
+              }
+            : null;
+          const invokeHandler = partnerSlug
+            ? (callArgs, _auth, previewOnly = false) =>
+                executePartnerTool(partnerSlug, callArgs, { previewOnly, reqMethod: "POST" })
+            : (callArgs, callAuth) => ROUTE_HANDLERS[mappedRoute](callArgs, callAuth);
 
           const hasPaymentAttempt = Boolean(
             req.headers["payment-signature"] ||
@@ -3205,7 +3506,8 @@ export function createAppServer() {
             req,
             mappedRoute,
             `${baseUrl}${mappedRoute}`,
-            args
+            args,
+            customSpec
           );
 
           if (!auth.authorized && hasPaymentAttempt) {
@@ -3216,12 +3518,12 @@ export function createAppServer() {
           }
 
           if (!auth.authorized) {
-            const priceUsd = PRICING[mappedRoute]?.priceUsd || "0.02";
+            const priceUsd = partnerEntry?.price_usdc || PRICING[mappedRoute]?.priceUsd || "0.02";
 
             // Always return full data for defi_swap_quote (earns 25bps on-chain fee) and x402_ping
             if (toolName === "defi_swap_quote" || toolName === "x402_ping") {
               await recordTelemetry("mcp_teaser", mappedRoute, req, toolName);
-              const freePreview = await ROUTE_HANDLERS[mappedRoute](args, null);
+              const freePreview = await invokeHandler(args, null, false);
               return sendJson(
                 res,
                 200,
@@ -3268,7 +3570,7 @@ export function createAppServer() {
                   req,
                   `${toolName} (${trial.used}/${MCP_DAILY_FREE_LIMIT})`
                 );
-                const fullTrialData = await ROUTE_HANDLERS[mappedRoute](args, null);
+                const fullTrialData = await invokeHandler(args, null, Boolean(partnerSlug));
                 return sendJson(
                   res,
                   200,
@@ -3313,7 +3615,7 @@ export function createAppServer() {
             const lockNote = `[LOCKED — Free daily MCP quota used. Unlock in 10s at ${baseUrl}/buy ($1 Starter 7-Day Pass or $5 Pro 30-Day Pass) OR pay $${priceUsd} USDC on Base via x402]`;
 
             const teaserArgs = { ...args, limit: 1, max_length: 160 };
-            const rawPreview = await ROUTE_HANDLERS[mappedRoute](teaserArgs, null);
+            const rawPreview = await invokeHandler(teaserArgs, null, true);
             const firstHeading = rawPreview?.llm_markdown
               ? rawPreview.llm_markdown.split("\n")[0].slice(0, 120)
               : `${toolName} live dataset ready`;
@@ -3369,7 +3671,27 @@ export function createAppServer() {
             );
           }
 
-          const output = await ROUTE_HANDLERS[mappedRoute](args, auth);
+          const output = await invokeHandler(args, auth, false);
+          if (partnerEntry) {
+            await ensureTelemetryLoaded(false);
+            const tracked = TELEMETRY.partner_tools[partnerSlug] || partnerEntry;
+            TELEMETRY.partner_tools[partnerSlug] = tracked;
+            const sellerRatio = (tracked.seller_share_pct ?? 85) / 100;
+            const kioskRatio = (tracked.kiosk_fee_pct ?? 15) / 100;
+            if (auth.mode === "x402") {
+              const gross = Number(tracked.price_usdc);
+              tracked.calls_paid = (tracked.calls_paid || 0) + 1;
+              tracked.gross_usdc = Number(((tracked.gross_usdc || 0) + gross).toFixed(6));
+              tracked.seller_earned_usdc = Number(
+                ((tracked.seller_earned_usdc || 0) + gross * sellerRatio).toFixed(6)
+              );
+              tracked.kiosk_fee_usdc = Number(
+                ((tracked.kiosk_fee_usdc || 0) + gross * kioskRatio).toFixed(6)
+              );
+            } else {
+              tracked.calls_paid = (tracked.calls_paid || 0) + 1;
+            }
+          }
           const attestation = attestResponse(mappedRoute, output);
           const isOwnerBoost =
             auth.payer && auth.payer.toLowerCase() === CONFIG.payToWallet.toLowerCase();
